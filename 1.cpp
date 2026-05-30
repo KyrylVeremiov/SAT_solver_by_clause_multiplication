@@ -31,9 +31,9 @@ string filename = "uf75-098.cnf";
 
 
 
-atomic<unsigned long long> counter{0};
-unsigned long long  treshold=1e7;
-atomic<unsigned long long> I{0};
+atomic<long long> counter{0};
+long long  treshold=10000;
+atomic<long long> I{0};
 
 atomic<bool> SAT{false};
 vector<string> res;
