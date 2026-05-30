@@ -19,7 +19,12 @@
 using namespace std;
 
 string file_dir = "test_cases/";
-string filename = "uuf75-097.cnf";
+
+
+// string filename = "big_unsat.cnf";
+string filename = "small_sat.cnf";
+
+// string filename = "uuf75-097.cnf";
 // string filename = "uf75-098.cnf";
 
 atomic<bool> SAT{false};
