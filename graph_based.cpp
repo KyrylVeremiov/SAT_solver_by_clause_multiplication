@@ -1,238 +1,274 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-const string dir = "test_cases/";
-const string filename = "test_sat.cnf";
-
 struct Node {
     int var;
-    Node* parent = nullptr;
-    Node* childF = nullptr;
-    Node* childT = nullptr;
+    Node* parent;
+    Node* childF;
+    Node* childT;
 
-    Node(int v) : var(v) {}
+    Node(int v) : var(v), parent(nullptr), childF(nullptr), childT(nullptr) {}
 };
 
 Node* root = nullptr;
 
-// -------------------- Utility -----------------------------
+struct Result {
+    Node* node;
+    bool stop_here;
+};
 
+long long CALL_ID = 0;
+
+// ------------------------------------------------------------
+// Clone subtree
+// ------------------------------------------------------------
+Node* clone_subtree(Node* node, Node* parent) {
+    if (!node) return nullptr;
+    Node* c = new Node(node->var);
+    c->parent = parent;
+    c->childF = clone_subtree(node->childF, c);
+    c->childT = clone_subtree(node->childT, c);
+    return c;
+}
+
+// ------------------------------------------------------------
+// Delete subtree
+// ------------------------------------------------------------
 void delete_subtree(Node* node) {
     if (!node) return;
-
-    if (!node->parent && node == root)
-        root = nullptr;
-
-    if (node->parent) {
-        if (node->parent->childF == node) node->parent->childF = nullptr;
-        if (node->parent->childT == node) node->parent->childT = nullptr;
-    }
-
-    if (node->childF) {
-        node->childF->parent = nullptr;
-        delete_subtree(node->childF);
-    }
-    if (node->childT) {
-        node->childT->parent = nullptr;
-        delete_subtree(node->childT);
-    }
-
+    delete_subtree(node->childF);
+    delete_subtree(node->childT);
     delete node;
 }
 
-Node* clone_subtree(Node* node, Node* parent) {
-    if (!node) return nullptr;
-
-    Node* copy = new Node(node->var);
-    copy->parent = parent;
-
-    copy->childF = clone_subtree(node->childF, copy);
-    copy->childT = clone_subtree(node->childT, copy);
-
-    return copy;
-}
-
-void backtrack_delete_until_split(Node* start) {
-    Node* cur = start;
-
-    while (cur) {
-        Node* p = cur->parent;
-
-        if (!p) {
-            delete_subtree(cur);
-            return;
-        }
-
-        bool hasTwo =
-            (p->childF && p->childT) ||
-            (p->childF && !p->childT) ||
-            (!p->childF && p->childT);
-
-        if (p->childF && p->childT) {
-            delete_subtree(cur);
-            return;
-        }
-
-        delete_subtree(cur);
-        cur = p;
-    }
-}
-
-// -------------------- Clause insertion -----------------------------
-
-bool edge_value(bool positive, bool isLast) {
+// ------------------------------------------------------------
+// Branch value for literal
+// ------------------------------------------------------------
+bool branch_value(bool positive, bool isLast) {
     if (isLast) return positive;
     return !positive;
 }
 
-void ensure_two_branches(Node* node) {
-    if (!node->childF && !node->childT) return;
-    if (!node->childF) node->childF = nullptr;
-    if (!node->childT) node->childT = nullptr;
+// ------------------------------------------------------------
+// Create new node M
+// ------------------------------------------------------------
+Node* create_node_M(int M, bool val_here, bool isLast, Node* parent) {
+    Node* n = new Node(M);
+    n->parent = parent;
+
+    n->childF = nullptr;
+    n->childT = nullptr;
+
+    return n;
 }
 
-void dfs_insert_clause(Node* node,
-                       Node* parent,
-                       bool parentEdge,
-                       const vector<int>& lits,
-                       size_t pos)
-{
-    if (pos >= lits.size()) return;
+// ------------------------------------------------------------
+// Insert M between parent and node
+// ------------------------------------------------------------
+Node* insert_between(Node* parent, Node* node, int M, bool val_here, bool isLast) {
+    Node* mid = new Node(M);
+    mid->parent = parent;
 
-    int lit = lits[pos];
-    int v = abs(lit);
-    bool positive = lit > 0;
-    bool isLast = (pos + 1 == lits.size());
-    bool val_here = edge_value(positive, isLast);
-
-    // ---------------- node == nullptr ----------------
-    if (!node) {
-        Node* cur = new Node(v);
-        cur->parent = parent;
-
-        if (parent) {
-            if (val_here == false) parent->childF = cur;
-            else parent->childT = cur;
-
-            if (val_here == false && !parent->childT) parent->childT = nullptr;
-            if (val_here == true && !parent->childF) parent->childF = nullptr;
-        } else {
-            root = cur;
-        }
-
-        Node* current = cur;
-
-        for (size_t i = pos + 1; i < lits.size(); ++i) {
-            int lit2 = lits[i];
-            int v2 = abs(lit2);
-            bool pos2 = lit2 > 0;
-            bool last2 = (i + 1 == lits.size());
-            bool val2 = edge_value(pos2, last2);
-
-            Node* nxt = new Node(v2);
-            nxt->parent = current;
-
-            if (val2 == false) current->childF = nxt;
-            else current->childT = nxt;
-
-            if (!last2) {
-                if (val2 == false && !current->childT) current->childT = nullptr;
-                if (val2 == true && !current->childF) current->childF = nullptr;
-            }
-
-            current = nxt;
-        }
-        return;
+    if (parent) {
+        if (parent->childF == node) parent->childF = mid;
+        if (parent->childT == node) parent->childT = mid;
+    } else {
+        root = mid;
     }
-
-    // ---------------- insert before node ----------------
-    if (node->var > v) {
-        Node* newNode = new Node(v);
-        newNode->parent = parent;
-
-        if (parent) {
-            if (parentEdge == false) parent->childF = newNode;
-            else parent->childT = newNode;
-        } else {
-            root = newNode;
-        }
-
-        if (isLast) {
-            if (val_here == false) newNode->childF = node;
-            else newNode->childT = node;
-            node->parent = newNode;
-
-            if (val_here == false && !newNode->childT) newNode->childT = nullptr;
-            if (val_here == true && !newNode->childF) newNode->childF = nullptr;
-        } else {
-            Node* copy = clone_subtree(node, newNode);
-            if (val_here == false) newNode->childF = copy;
-            else newNode->childT = copy;
-
-            if (val_here == false && !newNode->childT) newNode->childT = nullptr;
-            if (val_here == true && !newNode->childF) newNode->childF = nullptr;
-        }
-
-        if (!isLast) {
-            Node* child = (val_here == false ? newNode->childF : newNode->childT);
-            dfs_insert_clause(child, newNode, val_here, lits, pos + 1);
-        }
-        return;
-    }
-
-    // ---------------- node->var < v ----------------
-    if (node->var < v) {
-        ensure_two_branches(node);
-
-        dfs_insert_clause(node->childF, node, false, lits, pos);
-        dfs_insert_clause(node->childT, node, true, lits, pos);
-        return;
-    }
-
-    // ---------------- node->var == v ----------------
-    ensure_two_branches(node);
 
     if (isLast) {
-        Node*& need = (val_here == false ? node->childF : node->childT);
-        Node*& other = (val_here == false ? node->childT : node->childF);
+        if (!val_here) mid->childF = node;
+        else mid->childT = node;
+        node->parent = mid;
+    } else {
+        if (!val_here) {
+            mid->childF = node;
+            mid->childT = clone_subtree(node, mid);
+        } else {
+            mid->childT = node;
+            mid->childF = clone_subtree(node, mid);
+        }
+        node->parent = mid;
+    }
 
-        if (need) return;
+    return mid;
+}
+
+// ------------------------------------------------------------
+// Backtracking
+// ------------------------------------------------------------
+void backtrack(Node* node) {
+    while (node) {
+        Node* p = node->parent;
+        if (!p) {
+            delete_subtree(node);
+            root = nullptr;
+            return;
+        }
+
+        if (p->childF && p->childT) {
+            if (p->childF == node) p->childF = nullptr;
+            if (p->childT == node) p->childT = nullptr;
+            delete_subtree(node);
+            return;
+        }
+
+        if (p->childF == node) p->childF = nullptr;
+        if (p->childT == node) p->childT = nullptr;
+
+        delete_subtree(node);
+        node = p;
+    }
+}
+
+// ------------------------------------------------------------
+// Insert literal xM
+// ------------------------------------------------------------
+Result insert_literal(Node* node, Node* parent,
+                      int M, bool val_here, bool isLast) {
+
+    CALL_ID++;
+
+    static int depth = 0;
+    depth++;
+
+    if (depth > 2000) {
+        cerr << "!!! RECURSION LIMIT REACHED !!!\n";
+        cerr << "node=" << (node ? node->var : -1)
+             << " M=" << M
+             << " val=" << val_here
+             << " last=" << isLast << "\n";
+        exit(1);
+    }
+
+    cerr << "[CALL " << CALL_ID << " | depth " << depth << "] "
+         << "insert_literal(node=" << (node ? node->var : -1)
+         << ", parent=" << (parent ? parent->var : -1)
+         << ", M=" << M
+         << ", val=" << val_here
+         << ", last=" << isLast << ")\n";
+
+    // Case: empty
+    if (!node) {
+        Node* n = create_node_M(M, val_here, isLast, parent);
+        cerr << "  -> created node M=" << M << "\n";
+        depth--;
+        return {n, isLast};
+    }
+
+    int K = node->var;
+
+    // Case: K == M
+    if (K == M) {
+        if (!isLast) {
+            cerr << "  -> existing M, intermediate, stop_here\n";
+            depth--;
+            return {node, true};
+        }
+
+        Node*& need = (val_here ? node->childT : node->childF);
+        Node*& other = (val_here ? node->childF : node->childT);
+
+        if (need) {
+            if (other) {
+                delete_subtree(other);
+                other = nullptr;
+            }
+            cerr << "  -> last literal, need exists, stop_here\n";
+            depth--;
+            return {node, true};
+        }
+
+        if (!need && !other) {
+            cerr << "  -> last literal, both empty, backtrack\n";
+            backtrack(node);
+            depth--;
+            return {node, true};
+        }
 
         if (other) {
             delete_subtree(other);
             other = nullptr;
-            return;
         }
 
-        backtrack_delete_until_split(node);
-        return;
+        need = nullptr;
+        cerr << "  -> last literal, created need branch\n";
+        depth--;
+        return {node, true};
     }
 
-    Node*& next = (val_here == false ? node->childF : node->childT);
+    // Case: K < M
+    if (K < M) {
+        Node*& child = (val_here ? node->childT : node->childF);
 
-    if (!next) {
-        Node* base = node->childF ? node->childF : node->childT;
-        Node* child = base ? clone_subtree(base, node) : nullptr;
-        next = child;
+        if (!child) {
+            child = create_node_M(M, val_here, isLast, node);
+            cerr << "  -> K<M, created child M\n";
+            depth--;
+            return {node, false};
+        }
+
+        if (child->var == M) {
+            cerr << "  -> K<M, child==M, stop_here\n";
+            depth--;
+            return {node, true};
+        }
+
+        if (child->var > M || child->var < M) {
+            child = insert_between(node, child, M, val_here, isLast);
+            cerr << "  -> K<M, inserted between\n";
+            depth--;
+            return {node, false};
+        }
     }
 
-    dfs_insert_clause(next, node, val_here, lits, pos + 1);
+    // Case: K > M
+    Node* mid = insert_between(parent, node, M, val_here, isLast);
+    cerr << "  -> K>M, inserted between parent and node\n";
+    depth--;
+    return {mid, false};
 }
 
-// -------------------- Printing -----------------------------
+// ------------------------------------------------------------
+// Insert clause
+// ------------------------------------------------------------
+void insert_clause(const vector<int>& lits) {
+    if (!root) root = new Node(1);
 
+    Node* node = root;
+    Node* parent = nullptr;
+
+    for (int i = 0; i < (int)lits.size(); i++) {
+        int L = lits[i];
+        int M = abs(L);
+        bool positive = (L > 0);
+        bool isLast = (i + 1 == (int)lits.size());
+        bool val_here = branch_value(positive, isLast);
+
+        cerr << "\n=== INSERT LITERAL " << L << " (M=" << M << ") ===\n";
+
+        Result r = insert_literal(node, parent, M, val_here, isLast);
+        node = r.node;
+
+        if (!r.stop_here) {
+            Node*& next = (val_here ? node->childT : node->childF);
+            parent = node;
+            node = next;
+            cerr << "  -> descending to child: "
+                 << (node ? node->var : -1) << "\n";
+        } else {
+            parent = node;
+            cerr << "  -> stop_here, staying at node " << node->var << "\n";
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// Print tree
+// ------------------------------------------------------------
 void print_tree(Node* node, string indent = "", string edge = "") {
     if (!node) {
         cout << indent << edge << "null\n";
-        return;
-    }
-
-    bool isLeaf = (!node->childF && !node->childT);
-
-    if (isLeaf) {
-        int leafValue = (edge == "T-> ") ? 1 : 0;
-        cout << indent << edge << "x" << node->var
-             << " (leaf=" << leafValue << ")\n";
         return;
     }
 
@@ -242,46 +278,34 @@ void print_tree(Node* node, string indent = "", string edge = "") {
     print_tree(node->childT, indent + "  ", "T-> ");
 }
 
-// -------------------- MAIN -----------------------------
-
+// ------------------------------------------------------------
+// MAIN
+// ------------------------------------------------------------
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    ifstream fin(dir + filename);
-    if (!fin) {
-        cerr << "Cannot open file\n";
-        return 1;
-    }
-
     string line;
     int nVars, nClauses;
 
-    while (getline(fin, line)) {
-        if (line.size() && line[0] == 'p') {
-            string tmp, fmt;
-            stringstream ss(line);
-            ss >> tmp >> fmt >> nVars >> nClauses;
-            break;
-        }
+    getline(cin, line);
+    {
+        string tmp, fmt;
+        stringstream ss(line);
+        ss >> tmp >> fmt >> nVars >> nClauses;
     }
 
     root = new Node(1);
 
-    for (int c = 0; c < nClauses; ++c) {
-        getline(fin, line);
-        if (line.empty()) { c--; continue; }
-
-        stringstream ss(line);
+    for (int c = 0; c < nClauses; c++) {
+        getline(cin, line);
+        stringstream ss2(line);
         vector<int> lits;
         int x;
-        while (ss >> x && x != 0) lits.push_back(x);
-
-        dfs_insert_clause(root, nullptr, false, lits, 0);
+        while (ss2 >> x && x != 0) lits.push_back(x);
+        insert_clause(lits);
     }
 
-    cout << "Pseudo-tree:\n";
+    cout << "\nPseudo-tree:\n";
     print_tree(root);
-
-    return 0;
 }
