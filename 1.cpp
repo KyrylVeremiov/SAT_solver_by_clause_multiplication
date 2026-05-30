@@ -8,7 +8,7 @@
 #include <future>
 #include <atomic>
 #include <mutex>
-#include "sorting_clauses_num.h"
+// #include "sorting_clauses_num.h"
 // #include "sorting_clauses_greedy.h"
 #include "sorting_clauses_greedy_v2.h"
 // #include <unordered_set>
@@ -24,8 +24,8 @@ string file_dir = "test_cases/";
 // string filename = "big_unsat.cnf";
 // string filename = "big_sat.cnf";
 
-// string filename = "uf75-098.cnf";
 string filename = "uf75-098.cnf";
+// string filename = "uuf75-097.cnf";
 
 
 
@@ -46,6 +46,14 @@ bool multiply(const vector<vector<string>>& C, vector<string> prev, int i, int c
 // Parallelism tuning
 int PARALLEL_DEPTH = 8; // increase to parallelize deeper levels
 unsigned int MAX_TASKS = std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 4;
+
+
+
+
+
+
+
+
 
 // Gather initial prefixes up to `depth` levels to spawn tasks for
 static void gather_prefixes(const vector<vector<string>>& C, int depth, int i, vector<string> prev, vector<pair<vector<string>,int>>& out, int clausesCount) {
@@ -129,7 +137,22 @@ int main() {
 
     //  vector<set<string>> newC=sortClausesByConflicts(C);
     //  vector<set<string>> newC=orderByConflictClustering(C);
-    vector<vector<string>> newC=orderByConflictClusteringB(C);
+    vector<vector<string>> newC = orderByConflictClusteringB(C);
+
+    
+    cout<<"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n==============================\n";
+    cout<<"After sorting:\n";
+    // Output for verification
+    cout << "\nLoaded clauses:\n";
+    for (int i = 0; i < clauses; i++) {
+        cout << "Clause " << i + 1 << ": ";
+        for (const string& s : newC[i]) {
+            cout << s << " ";
+        }
+        cout << "\n";
+    }
+    cout<<"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n==============================\n";
+
     
     cout << multiply(newC, {}, 0, clauses) << "\n";
 

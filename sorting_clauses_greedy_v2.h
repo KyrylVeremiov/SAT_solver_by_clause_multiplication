@@ -5,32 +5,33 @@
 #include <string>
 #include <algorithm>
 #include <unordered_map>
-#include <algorithm>
 
 using std::vector;
 using std::string;
 using std::unordered_map;
 
+// ------------------------------------------------------------
+// Sort literals inside a clause by ascending absolute value
+// ------------------------------------------------------------
+inline void sortLiteralsByAbsInClause(vector<string>& clause) {
+    std::sort(clause.begin(), clause.end(),
+        [](const string& a, const string& b) {
+            int va = std::stoi(a);
+            int vb = std::stoi(b);
+            int aa = std::abs(va);
+            int ab = std::abs(vb);
+            if (aa != ab) return aa < ab;
+            return va < vb; // при равном модуле отрицательные первыми
+        }
+    );
+}
+
 /*
     ============================================================
     HYBRID CNF ORDERING (Variant B, conflict-free version)
     ============================================================
-
-    This version guarantees:
-        ✔ Clauses with the highest total conflict score appear first.
-        ✔ Local conflict density is preserved via MAO inside groups.
-        ✔ No name collisions with other headers (all functions renamed).
-
-    Method:
-        1. Build conflict graph G[i][j].
-        2. Compute global conflict score for each clause.
-        3. Sort clauses by descending score.
-        4. Inside equal-score groups, apply greedy MAO.
 */
 
-
-// ------------------------------------------------------------
-// Split clause string into literals (unique name: splitClauseB)
 // ------------------------------------------------------------
 inline vector<string> splitClauseB(const string& clause) {
     vector<string> out;
@@ -44,9 +45,6 @@ inline vector<string> splitClauseB(const string& clause) {
     return out;
 }
 
-
-// ------------------------------------------------------------
-// Build conflict graph G[i][j] (unique name: buildConflictGraphB)
 // ------------------------------------------------------------
 inline vector<vector<int>> buildConflictGraphB(const vector<string>& C) {
     int n = C.size();
@@ -76,9 +74,6 @@ inline vector<vector<int>> buildConflictGraphB(const vector<string>& C) {
     return G;
 }
 
-
-// ------------------------------------------------------------
-// Compute global conflict score (unique name: computeScoresB)
 // ------------------------------------------------------------
 inline vector<int> computeScoresB(const vector<vector<int>>& G) {
     int n = G.size();
@@ -91,9 +86,6 @@ inline vector<int> computeScoresB(const vector<vector<int>>& G) {
     return score;
 }
 
-
-// ------------------------------------------------------------
-// Greedy MAO inside equal-score group (unique name: greedyMAOB)
 // ------------------------------------------------------------
 inline vector<int> greedyMAOB(const vector<int>& group,
                               const vector<vector<int>>& G)
@@ -105,7 +97,6 @@ inline vector<int> greedyMAOB(const vector<int>& group,
 
     auto gi = [&](int local) { return group[local]; };
 
-    // Start from clause with max internal conflict
     int start = 0;
     int bestScore = -1;
     for (int a = 0; a < m; a++) {
@@ -118,7 +109,6 @@ inline vector<int> greedyMAOB(const vector<int>& group,
     order.push_back(gi(start));
     used[start] = true;
 
-    // Greedy expansion
     for (int step = 1; step < m; step++) {
         int last = order.back();
         int best = -1, bestW = -1;
@@ -139,12 +129,8 @@ inline vector<int> greedyMAOB(const vector<int>& group,
     return order;
 }
 
-
-// ------------------------------------------------------------
-// Main function (unique name: orderByConflictClusteringB)
 // ------------------------------------------------------------
 inline vector<vector<string>> orderByConflictClusteringB(const vector<vector<string>>& input) {
-    // Convert clauses to strings
     vector<string> C;
     C.reserve(input.size());
     for (const auto& s : input) {
@@ -162,17 +148,14 @@ inline vector<vector<string>> orderByConflictClusteringB(const vector<vector<str
     auto G = buildConflictGraphB(C);
     auto score = computeScoresB(G);
 
-    // Create index list
     vector<int> idx(n);
     for (int i = 0; i < n; i++) idx[i] = i;
 
-    // Sort by descending score
     std::sort(idx.begin(), idx.end(),
               [&](int a, int b) {
                   return score[a] > score[b];
               });
 
-    // Group by equal score and apply MAO
     vector<int> finalOrder;
     for (int i = 0; i < n; ) {
         int s = score[idx[i]];
@@ -187,11 +170,12 @@ inline vector<vector<string>> orderByConflictClusteringB(const vector<vector<str
         finalOrder.insert(finalOrder.end(), localOrder.begin(), localOrder.end());
     }
 
-    // Convert back to clause vectors
     vector<vector<string>> out;
     out.reserve(n);
-    for (int id : finalOrder)
+    for (int id : finalOrder) {
         out.push_back(input[id]);
+        sortLiteralsByAbsInClause(out.back());   // ← ← ← ВОТ ЭТО ДОБАВЛЕНО
+    }
 
     return out;
 }
