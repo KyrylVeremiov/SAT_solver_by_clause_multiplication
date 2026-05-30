@@ -120,105 +120,49 @@ int main() {
 
 
 
-bool multiply_recursive(const vector<set<string>>& C, set<string> prev, int i, int clausesCount) {
+bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clausesCount) {
 
-    if (SAT.load(memory_order_relaxed)) {
-        return true;
-    }
-
-    if (i >= clausesCount) {
-        bool expected = false;
-        if (SAT.compare_exchange_strong(expected, true, memory_order_acq_rel)) {
-            lock_guard<mutex> lock(res_mutex);
-            res = std::move(prev);
-        }
-        return true;
-    }
-
-    for (const string& value : C[i]) {
-        if (SAT.load(memory_order_relaxed)) {
+    if (!SAT) {
+        
+        if (i >= clausesCount){
+            SAT = true;
+            res=prev;
             return true;
         }
 
-        if (i == 0) {
-            I.fetch_add(1, memory_order_relaxed);
-        }
-        string match_value;
-
-        if (value[0] == '-') {
-            match_value = value.substr(1);
-        }
-        else {
-            match_value = "-" + value;
-        }
-
-        int current = counter.fetch_add(1, memory_order_relaxed) + 1;
-        if (current > treshold) {
-            lock_guard<mutex> lock(cout_mutex);
-            cout << "Counter: " << I.load(memory_order_relaxed) << " / " << clausesCount << "\n";
-            counter.store(0, memory_order_relaxed);
-        }
-
-        if (prev.find(match_value) == prev.end()) {
-            set<string> new_prev = prev;
-            new_prev.insert(value);
-            bool next = multiply_recursive(C, std::move(new_prev), i + 1, clausesCount);
-            if (next) {
-                return true;
+            
+        for (const string& value : C[i]) {
+            if(i==0){
+                I++;
             }
-        }
-    }
-    return false;
-}
-
-bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clausesCount) {
-    if (SAT.load(memory_order_relaxed)) {
-        return true;
-    }
-
-    if (i >= clausesCount) {
-        bool expected = false;
-        if (SAT.compare_exchange_strong(expected, true, memory_order_acq_rel)) {
-            lock_guard<mutex> lock(res_mutex);
-            res = std::move(prev);
-        }
-        return true;
-    }
-
-    if (i == 0) {
-        vector<future<bool>> futures;
-        futures.reserve(C[0].size());
-
-        for (const string& value : C[0]) {
             string match_value;
-            if (value[0] == '-') {
-                match_value = value.substr(1);
+            
+            if(value[0] == '-'){
+            match_value = value.substr(1);
             }
             else {
                 match_value = "-" + value;
             }
 
+            
+            if (counter > treshold) {
+                cout << "Counter: " << I <<" / " << clausesCount << "\n";
+                counter = 0;
+            }
+            counter++;
+            
             if (prev.find(match_value) == prev.end()) {
                 set<string> new_prev = prev;
                 new_prev.insert(value);
-                futures.emplace_back(std::async(std::launch::async,
-                    [&, new_prev = std::move(new_prev)]() mutable {
-                        return multiply_recursive(C, std::move(new_prev), 1, clausesCount);
-                    }
-                ));
-            }
-        }
-
-        for (auto& fut : futures) {
-            if (fut.get()) {
-                return true;
-            }
-            if (SAT.load(memory_order_relaxed)) {
-                return true;
+                bool next = multiply(C, new_prev, i + 1, clausesCount);
+                if (next) {
+                    return true;
+                }
             }
         }
         return false;
     }
-
-    return multiply_recursive(C, std::move(prev), i, clausesCount);
+    else {
+        return true;
+    }
 }

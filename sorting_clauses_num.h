@@ -1,10 +1,44 @@
-//DEPRECATED. See sorting_clauses.h and sorting_clauses_greedy.h for new versions of this code.
-
 //Sorting by number of conflicts for each clause, using fast variable indexing. If C1 conflicts with C2, C3
 // then C1 has score 2, C2 and C3 have score 1. Clauses are sorted by descending score. This is 
 // a heuristic to cluster.
 
 
+/*
+
+    ============================================================
+    CNF SORTER — OLD CONFLICT SCORING LOGIC (VARIABLE INDEXING)
+    ============================================================
+
+    INPUT:  vector<set<string>>
+            Each clause is a set of literals, e.g. {"1", "-2", "3"}
+
+    OUTPUT: vector<set<string>>
+            Same clauses, but sorted in descending order of
+            "conflict score" according to the old logic.
+
+    ------------------------------------------------------------
+    OLD CONFLICT LOGIC (VARIABLE-BASED INDEXING)
+    ------------------------------------------------------------
+
+    1. Build an index of variables:
+           x  → list of clauses containing x
+           -x → list of clauses containing -x
+
+    2. For each variable:
+           If x appears in P clauses
+           and -x appears in N clauses,
+           then each clause containing x gets +N,
+           and each clause containing -x gets +P.
+
+    This does NOT count the number of conflicting clauses.
+    It counts the "weight" of variable conflicts across CNF.
+
+    ------------------------------------------------------------
+    PURPOSE
+    ------------------------------------------------------------
+
+    Produce an ordering where clauses with higher potential
+    conflict weight appear earlier in the list.*/
 
 #ifndef CNF_SORTER_H
 #define CNF_SORTER_H
@@ -12,18 +46,28 @@
 #include <string>
 #include <vector>
 #include <set>
-#include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
 
 using std::string;
 using std::vector;
 using std::set;
-using std::unordered_set;
 using std::unordered_map;
 
 // -------------------------
-// Utility: split clause string into literals
+// Join set<string> into a single clause string
+// -------------------------
+inline string joinClause(const set<string>& clause) {
+    string out;
+    for (const auto& lit : clause) {
+        if (!out.empty()) out += " ";
+        out += lit;
+    }
+    return out;
+}
+
+// -------------------------
+// Split clause string into literals
 // -------------------------
 inline vector<string> splitClause(const string& clause) {
     vector<string> out;
@@ -51,7 +95,6 @@ inline vector<string> splitClause(const string& clause) {
 inline vector<int> computeConflictScoresFast(const vector<string>& clauses) {
     int n = clauses.size();
 
-    // variable → list of clause indices
     unordered_map<string, vector<int>> pos;
     unordered_map<string, vector<int>> neg;
 
@@ -90,14 +133,16 @@ inline vector<int> computeConflictScoresFast(const vector<string>& clauses) {
 }
 
 // -------------------------
-// Main function:
-// input: set<string>*
-// output: unordered_set<string>*
+// Main function: input vector<set<string>> → output vector<set<string>>
 // -------------------------
-inline unordered_set<string>* sortClausesByConflicts(set<string>* input) {
-    // Convert set → vector
-    vector<string> C(input->begin(), input->end());
-    int n = C.size();
+inline vector<set<string>> sortClausesByConflicts(const vector<set<string>>& input) {
+    int n = input.size();
+
+    // Convert vector<set<string>> → vector<string>
+    vector<string> C;
+    C.reserve(n);
+    for (const auto& clause : input)
+        C.push_back(joinClause(clause));
 
     // Compute conflict scores
     vector<int> score = computeConflictScoresFast(C);
@@ -113,13 +158,17 @@ inline unordered_set<string>* sortClausesByConflicts(set<string>* input) {
                   return score[a] > score[b];
               });
 
-    // Create output unordered_set
-    auto* result = new unordered_set<string>();
-    result->reserve(n);
+    // Build sorted vector<set<string>>
+    vector<set<string>> result;
+    result.reserve(n);
 
-    // Insert in sorted order
-    for (int idx : order)
-        result->insert(C[idx]);
+    for (int idx : order) {
+        set<string> clauseSet;
+        for (const string& lit : splitClause(C[idx]))
+            clauseSet.insert(lit);
+
+        result.push_back(std::move(clauseSet));
+    }
 
     return result;
 }
