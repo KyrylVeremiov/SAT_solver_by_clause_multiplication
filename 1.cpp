@@ -102,8 +102,6 @@ int main() {
 
 
 
-
-
 bool multiply(set<string>* C,set<string> prev, int i, int clausesCount) {
 
     if (!SAT) {
