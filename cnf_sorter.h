@@ -11,14 +11,13 @@
 
 #include <string>
 #include <vector>
-#include <set>
+#include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
 
 using std::string;
 using std::vector;
-using std::set;
 using std::unordered_set;
 using std::unordered_map;
 
@@ -91,13 +90,25 @@ inline vector<int> computeConflictScoresFast(const vector<string>& clauses) {
 
 // -------------------------
 // Main function:
-// input: set<string>*
-// output: unordered_set<string>*
+// input: vector<vector<string>>
+// output: vector<vector<string>>
 // -------------------------
-inline unordered_set<string>* sortClausesByConflicts(set<string>* input) {
-    // Convert set → vector
-    vector<string> C(input->begin(), input->end());
-    int n = C.size();
+inline vector<vector<string>> sortClausesByConflicts(const vector<vector<string>>& input) {
+    int n = input.size();
+
+    // Convert vector<vector<string>> -> vector<string>
+    vector<string> C;
+    C.reserve(n);
+    for (const auto& cl : input) {
+        string s;
+        bool first = true;
+        for (const auto& lit : cl) {
+            if (!first) s.push_back(' ');
+            s += lit;
+            first = false;
+        }
+        C.push_back(std::move(s));
+    }
 
     // Compute conflict scores
     vector<int> score = computeConflictScoresFast(C);
@@ -113,13 +124,11 @@ inline unordered_set<string>* sortClausesByConflicts(set<string>* input) {
                   return score[a] > score[b];
               });
 
-    // Create output unordered_set
-    auto* result = new unordered_set<string>();
-    result->reserve(n);
-
-    // Insert in sorted order
+    // Build result preserving original clause vectors
+    vector<vector<string>> result;
+    result.reserve(n);
     for (int idx : order)
-        result->insert(C[idx]);
+        result.push_back(input[idx]);
 
     return result;
 }

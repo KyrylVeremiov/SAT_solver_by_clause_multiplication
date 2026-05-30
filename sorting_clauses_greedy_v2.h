@@ -3,13 +3,12 @@
 
 #include <vector>
 #include <string>
-#include <set>
+#include <algorithm>
 #include <unordered_map>
 #include <algorithm>
 
 using std::vector;
 using std::string;
-using std::set;
 using std::unordered_map;
 
 /*
@@ -144,7 +143,7 @@ inline vector<int> greedyMAOB(const vector<int>& group,
 // ------------------------------------------------------------
 // Main function (unique name: orderByConflictClusteringB)
 // ------------------------------------------------------------
-inline vector<set<string>> orderByConflictClusteringB(const vector<set<string>>& input) {
+inline vector<vector<string>> orderByConflictClusteringB(const vector<vector<string>>& input) {
     // Convert clauses to strings
     vector<string> C;
     C.reserve(input.size());
@@ -188,8 +187,8 @@ inline vector<set<string>> orderByConflictClusteringB(const vector<set<string>>&
         finalOrder.insert(finalOrder.end(), localOrder.begin(), localOrder.end());
     }
 
-    // Convert back to clause sets
-    vector<set<string>> out;
+    // Convert back to clause vectors
+    vector<vector<string>> out;
     out.reserve(n);
     for (int id : finalOrder)
         out.push_back(input[id]);

@@ -41,13 +41,12 @@
 
 #include <vector>
 #include <string>
-#include <set>
+#include <algorithm>
 #include <unordered_map>
 #include <algorithm>
 
 using std::vector;
 using std::string;
-using std::set;
 using std::unordered_map;
 
 // Split clause into literals for greedy ordering
@@ -109,7 +108,7 @@ inline vector<vector<int>> buildConflictGraph(const vector<string>& C) {
 // to maximize conflict weight with the previously chosen clause.
 
 // Maximum adjacency ordering
-inline vector<set<string>> orderByConflictClustering(const vector<set<string>>& input) {
+inline vector<vector<string>> orderByConflictClustering(const vector<vector<string>>& input) {
     // Convert vector<set<string>> -> vector<string> where each clause's literals are space-separated
     vector<string> C;
     C.reserve(input.size());
@@ -160,8 +159,8 @@ inline vector<set<string>> orderByConflictClustering(const vector<set<string>>& 
         result.push_back(best);
     }
 
-    // Convert indices to original clause sets
-    vector<set<string>> out;
+    // Convert indices to original clause vectors
+    vector<vector<string>> out;
     out.reserve(n);
     for (int idx : result)
         out.push_back(input[idx]);
@@ -170,7 +169,7 @@ inline vector<set<string>> orderByConflictClustering(const vector<set<string>>& 
 }
 
 // Pointer-taking overload for backward compatibility with code that uses &C
-inline vector<set<string>> orderByConflictClustering(const vector<set<string>>* input) {
+inline vector<vector<string>> orderByConflictClustering(const vector<vector<string>>* input) {
     return orderByConflictClustering(*input);
 }
 

@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <set>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <thread>
@@ -34,12 +34,12 @@ int treshold=10000;
 atomic<long long> I{0};
 
 atomic<bool> SAT{false};
-set<string> res;
+vector<string> res;
 mutex res_mutex;
 mutex cout_mutex;
 
-bool multiply_recursive(const vector<set<string>>& C, set<string> prev, int i, int clausesCount);
-bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clausesCount);
+bool multiply_recursive(const vector<vector<string>>& C, vector<string> prev, int i, int clausesCount);
+bool multiply(const vector<vector<string>>& C, vector<string> prev, int i, int clausesCount);
 
 int main() {
     // Fixed filename instead of user input
@@ -63,8 +63,8 @@ int main() {
         }
     }
 
-    // Create a vector of sets (one set per clause)
-    vector<set<string>> C(clauses);
+    // Create a vector of vectors (one vector per clause)
+    vector<vector<string>> C(clauses);
 
     int clauseIndex = 0;
 
@@ -79,7 +79,7 @@ int main() {
         // Read literals as strings until "0"
         while (ss >> token) {
             if (token == "0") break;
-            C[clauseIndex].insert(token);
+            C[clauseIndex].push_back(token);
         }
 
         if (!C[clauseIndex].empty())
@@ -104,7 +104,7 @@ int main() {
 
     //  vector<set<string>> newC=sortClausesByConflicts(C);
     //  vector<set<string>> newC=orderByConflictClustering(C);
-     vector<set<string>> newC=orderByConflictClusteringB(C);
+    vector<vector<string>> newC=orderByConflictClusteringB(C);
     
     cout << multiply(newC, {}, 0, clauses) << "\n";
 
@@ -120,7 +120,7 @@ int main() {
 
 
 
-bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clausesCount) {
+bool multiply(const vector<vector<string>>& C, vector<string> prev, int i, int clausesCount) {
 
     if (!SAT) {
         
@@ -138,7 +138,7 @@ bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clauses
             string match_value;
             
             if(value[0] == '-'){
-            match_value = value.substr(1);
+                match_value = value.substr(1);
             }
             else {
                 match_value = "-" + value;
@@ -151,9 +151,9 @@ bool multiply(const vector<set<string>>& C, set<string> prev, int i, int clauses
             }
             counter++;
             
-            if (prev.find(match_value) == prev.end()) {
-                set<string> new_prev = prev;
-                new_prev.insert(value);
+            if (std::find(prev.begin(), prev.end(), match_value) == prev.end()) {
+                vector<string> new_prev = prev;
+                new_prev.push_back(value);
                 bool next = multiply(C, new_prev, i + 1, clausesCount);
                 if (next) {
                     return true;

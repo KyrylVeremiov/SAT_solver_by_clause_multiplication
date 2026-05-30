@@ -51,13 +51,13 @@
 
 using std::string;
 using std::vector;
-using std::set;
+//using std::set;
 using std::unordered_map;
 
 // -------------------------
-// Join set<string> into a single clause string
+// Join vector<string> into a single clause string
 // -------------------------
-inline string joinClause(const set<string>& clause) {
+inline string joinClause(const vector<string>& clause) {
     string out;
     for (const auto& lit : clause) {
         if (!out.empty()) out += " ";
@@ -133,12 +133,12 @@ inline vector<int> computeConflictScoresFast(const vector<string>& clauses) {
 }
 
 // -------------------------
-// Main function: input vector<set<string>> → output vector<set<string>>
+// Main function: input vector<vector<string>> → output vector<vector<string>>
 // -------------------------
-inline vector<set<string>> sortClausesByConflicts(const vector<set<string>>& input) {
+inline vector<vector<string>> sortClausesByConflicts(const vector<vector<string>>& input) {
     int n = input.size();
 
-    // Convert vector<set<string>> → vector<string>
+    // Convert vector<vector<string>> → vector<string> (joined)
     vector<string> C;
     C.reserve(n);
     for (const auto& clause : input)
@@ -158,16 +158,13 @@ inline vector<set<string>> sortClausesByConflicts(const vector<set<string>>& inp
                   return score[a] > score[b];
               });
 
-    // Build sorted vector<set<string>>
-    vector<set<string>> result;
+    // Build sorted vector<vector<string>>
+    vector<vector<string>> result;
     result.reserve(n);
 
     for (int idx : order) {
-        set<string> clauseSet;
-        for (const string& lit : splitClause(C[idx]))
-            clauseSet.insert(lit);
-
-        result.push_back(std::move(clauseSet));
+        // preserve clause literal ordering from input
+        result.push_back(input[idx]);
     }
 
     return result;
