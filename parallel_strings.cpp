@@ -32,7 +32,7 @@ string filename = "uf75-098.cnf";
 
 
 atomic<unsigned long long> counter{0};
-unsigned long long  treshold=1e7;
+unsigned long long  treshold=1e8;
 atomic<unsigned long long> I{0};
 
 atomic<bool> SAT{false};
