@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include "sorting_clauses.h"
 
 struct Node {
     int varIndex;
@@ -281,8 +282,15 @@ bool parseCNF(const std::string& filename,
 int main() {
     Node* root = nullptr;
 
+    // string filename = "test_sat.cnf";
+    string filename = "uuf75-097.cnf";
+    // string filename = "uf75-098.cnf";
+    string folder_name = "test_cases/";
+
+    sort_clauses(folder_name, filename);
+
     std::vector<std::vector<Literal>> clauses;
-    if (!parseCNF("test_cases/test_sat.cnf", clauses)) {
+    if (!parseCNF(folder_name +"sorted_" + filename, clauses)) {
         return 1;
     }
 
