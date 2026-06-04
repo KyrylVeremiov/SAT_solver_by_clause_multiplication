@@ -5,28 +5,23 @@
 #include <string>
 #include <functional>
 
-// -------------------- Data structures --------------------
-
 struct Node {
-    int varIndex;      // variable index (x1, x2, ...)
+    int varIndex;
     Node* parent;
-    Node* childTrue;   // branch where variable is true
-    Node* childFalse;  // branch where variable is false
+    Node* childTrue;
+    Node* childFalse;
 
     Node(int v = 0)
         : varIndex(v), parent(nullptr), childTrue(nullptr), childFalse(nullptr) {}
 };
 
-// Global dummy node: represents impossible path
 Node* dummyNode = new Node(-1);
 
 struct Literal {
-    int var;      // variable index
-    bool isNeg;   // true if literal is negated
-    bool isLast;  // true if this is the last literal in clause
+    int var;
+    bool isNeg;
+    bool isLast;
 };
-
-// -------------------- Utilities --------------------
 
 Node* deepCopy(Node* root, Node* parent = nullptr) {
     if (!root || root == dummyNode) return root;
@@ -69,7 +64,6 @@ void printTree(Node* root) {
             }
         };
 
-        // False branch first, then True
         printChild(node->childFalse, 'F', indent);
         printChild(node->childTrue, 'T', indent);
     };
@@ -77,46 +71,68 @@ void printTree(Node* root) {
     printChildren(root, 2);
 }
 
-// -------------------- Conflict handling --------------------
-
 void resolveConflictLastLiteral(Node* node, bool isNeg) {
     if (!node || node == dummyNode) return;
 
     if (isNeg) {
-        // Last literal is negated: conflict when childFalse == dummyNode
         deleteSubtree(node->childTrue);
         node->childTrue = dummyNode;
     } else {
-        // Last literal is positive: conflict when childTrue == dummyNode
         deleteSubtree(node->childFalse);
         node->childFalse = dummyNode;
     }
 
-    // Upward deletion of parents until a node with both children != dummyNode
-    // can be added here if needed, using parent pointers.
+    Node* current = node;
+    Node* parent = current->parent;
+    Node* child = current;
+
+    while (parent) {
+        bool parentCanTrue = (parent->childTrue != dummyNode);
+        bool parentCanFalse = (parent->childFalse != dummyNode);
+
+        if (parentCanTrue && parentCanFalse) {
+            if (parent->childTrue == child) {
+                deleteSubtree(parent->childTrue);
+                parent->childTrue = dummyNode;
+            } else if (parent->childFalse == child) {
+                deleteSubtree(parent->childFalse);
+                parent->childFalse = dummyNode;
+            }
+            break;
+        }
+
+        Node* grand = parent->parent;
+
+        if (grand) {
+            if (grand->childTrue == parent) {
+                grand->childTrue = dummyNode;
+            } else if (grand->childFalse == parent) {
+                grand->childFalse = dummyNode;
+            }
+        }
+
+        deleteSubtree(parent);
+
+        child = parent;
+        parent = grand;
+    }
 }
 
-// -------------------- Core insertion logic --------------------
-
-// Insert sequence of literals from clause[idx...] starting at current node
 void insertSequenceFrom(Node*& current,
                         Node* parent,
                         const std::vector<Literal>& clause,
                         int idx) {
     if (idx >= (int)clause.size()) return;
-    if (current == dummyNode) return; // impossible path
+    if (current == dummyNode) return;
 
     const Literal& lit = clause[idx];
     bool isLast = lit.isLast;
 
-    // If we are at a leaf (nullptr), insert literal here
     if (!current) {
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
 
         if (isLast) {
-            // Last literal: one branch points to subtree below (currently nullptr),
-            // other branch is dummyNode, depending on sign.
             if (lit.isNeg) {
                 newNode->childFalse = nullptr;
                 newNode->childTrue = dummyNode;
@@ -125,14 +141,12 @@ void insertSequenceFrom(Node*& current,
                 newNode->childFalse = dummyNode;
             }
         } else {
-            // Non-last literal: both branches exist, both point to subtree below (nullptr here).
             newNode->childTrue = nullptr;
             newNode->childFalse = nullptr;
         }
 
         current = newNode;
 
-        // If non-last, continue sequence down one branch depending on sign
         if (!isLast) {
             Node*& nextBranch = lit.isNeg ? newNode->childTrue : newNode->childFalse;
             insertSequenceFrom(nextBranch, newNode, clause, idx + 1);
@@ -141,37 +155,42 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
-    // Compare indices
     if (lit.var == current->varIndex) {
-        // Node with this literal already exists
         if (isLast) {
-            // Last literal: check for conflict
             if (lit.isNeg) {
+                // Last literal is negated: satisfying branch is childFalse
                 if (current->childFalse == dummyNode) {
+                    // Conflict: satisfying branch already impossible
                     resolveConflictLastLiteral(current, true);
+                } else {
+                    // Normal case: forbid True, delete subtree below childTrue
+                    deleteSubtree(current->childTrue);
+                    current->childTrue = dummyNode;
                 }
             } else {
+                // Last literal is positive: satisfying branch is childTrue
                 if (current->childTrue == dummyNode) {
+                    // Conflict: satisfying branch already impossible
                     resolveConflictLastLiteral(current, false);
+                } else {
+                    // Normal case: forbid False, delete subtree below childFalse
+                    deleteSubtree(current->childFalse);
+                    current->childFalse = dummyNode;
                 }
             }
         } else {
-            // Non-last literal: continue with next literals down one branch
             Node*& nextBranch = lit.isNeg ? current->childTrue : current->childFalse;
-            if (nextBranch == dummyNode) return; // path impossible
+            if (nextBranch == dummyNode) return;
             insertSequenceFrom(nextBranch, current, clause, idx + 1);
         }
         return;
     }
 
     if (lit.var < current->varIndex) {
-        // Insert between parent and current (before current)
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
 
         if (isLast) {
-            // Last literal: one branch points to subtree below (current),
-            // other branch is dummyNode, depending on sign.
             if (lit.isNeg) {
                 newNode->childFalse = current;
                 newNode->childTrue = dummyNode;
@@ -180,9 +199,6 @@ void insertSequenceFrom(Node*& current,
                 newNode->childFalse = dummyNode;
             }
         } else {
-            // Non-last literal: both branches exist
-            // childTrue -> original subtree (current)
-            // childFalse -> deep copy of subtree
             newNode->childTrue = current;
             newNode->childFalse = deepCopy(current, newNode);
             current->parent = newNode;
@@ -198,19 +214,15 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
-    // lit.var > current->varIndex: we must go down
     bool canTrue = (current->childTrue != dummyNode);
     bool canFalse = (current->childFalse != dummyNode);
 
-    // If node has both children not dummyNode, this is a branching point:
-    // we must insert the whole sequence clause[idx...] into both branches.
     if (canTrue && canFalse) {
         insertSequenceFrom(current->childFalse, current, clause, idx);
         insertSequenceFrom(current->childTrue, current, clause, idx);
         return;
     }
 
-    // Only one branch is possible
     if (canFalse && (!current->childTrue || current->childTrue == dummyNode)) {
         insertSequenceFrom(current->childFalse, current, clause, idx);
         return;
@@ -220,17 +232,13 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
-    // Both branches are dummyNode: path impossible
     return;
 }
 
-// Process one clause: literals are inserted sequentially from root
 void insertClause(Node*& root, const std::vector<Literal>& clause) {
     if (clause.empty()) return;
     insertSequenceFrom(root, nullptr, clause, 0);
 }
-
-// -------------------- DIMACS parsing --------------------
 
 bool parseCNF(const std::string& filename,
               std::vector<std::vector<Literal>>& clauses) {
@@ -243,8 +251,8 @@ bool parseCNF(const std::string& filename,
     std::string line;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
-        if (line[0] == 'c') continue; // comment
-        if (line[0] == 'p') continue; // problem line
+        if (line[0] == 'c') continue;
+        if (line[0] == 'p') continue;
 
         std::istringstream iss(line);
         int x;
@@ -270,8 +278,6 @@ bool parseCNF(const std::string& filename,
     return true;
 }
 
-// -------------------- Main --------------------
-
 int main() {
     Node* root = nullptr;
 
@@ -280,15 +286,12 @@ int main() {
         return 1;
     }
 
-    // For each clause, insert its literals sequentially starting from root
     for (const auto& clause : clauses) {
         insertClause(root, clause);
     }
 
-    // Print resulting pseudo-tree
     printTree(root);
 
-    // Cleanup
     deleteSubtree(root);
     delete dummyNode;
 
