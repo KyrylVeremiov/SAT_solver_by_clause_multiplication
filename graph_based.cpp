@@ -1,355 +1,376 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <string>
-#include <sstream>
 
-// Node of pseudo-tree
+using namespace std;
+
+// ========================= NODE STRUCT =========================
+
 struct Node {
-    int varIndex;      // variable index x_k
+    int varIndex;       // literal index
+    bool isDummy;       // true for dummy node
     Node* parent;
     Node* childTrue;
     Node* childFalse;
 
-    Node(int idx = -1)
-        : varIndex(idx), parent(nullptr), childTrue(nullptr), childFalse(nullptr) {}
+    Node(int idx = 0, bool dummy = false)
+        : varIndex(idx), isDummy(dummy),
+          parent(nullptr), childTrue(nullptr), childFalse(nullptr) {}
 };
 
-// Global dummy node (represents impossible value)
-Node* DUMMY = new Node(-1);
-
-// Root of the pseudo-tree
+Node* dummyNode = new Node(0, true);
 Node* root = nullptr;
 
-// ---------- Utility functions ----------
+// ========================= TREE UTILITIES =========================
 
-// Deep copy of a subtree (excluding dummy)
-Node* cloneSubtree(Node* node, Node* parent = nullptr) {
-    if (!node || node == DUMMY) return node;
-    Node* copy = new Node(node->varIndex);
-    copy->parent = parent;
-    copy->childTrue = cloneSubtree(node->childTrue, copy);
-    copy->childFalse = cloneSubtree(node->childFalse, copy);
-    return copy;
+Node* deepCopy(Node* node, Node* parent = nullptr) {
+    if (!node) return nullptr;
+    if (node->isDummy) return dummyNode;
+
+    Node* c = new Node(node->varIndex, false);
+    c->parent = parent;
+    c->childTrue = deepCopy(node->childTrue, c);
+    c->childFalse = deepCopy(node->childFalse, c);
+    return c;
 }
 
-// Delete subtree (excluding dummy)
 void deleteSubtree(Node* node) {
-    if (!node || node == DUMMY) return;
+    if (!node || node->isDummy) return;
     deleteSubtree(node->childTrue);
     deleteSubtree(node->childFalse);
     delete node;
 }
 
-// Conflict handling: delete one branch below node and prune upwards
-void handleConflict(Node* node, bool deleteTrueBranch) {
-    if (!node) return;
+// ========================= PRINTING =========================
 
-    // Delete conflicting branch below this node
-    if (deleteTrueBranch) {
-        deleteSubtree(node->childTrue);
-        node->childTrue = DUMMY;
-    } else {
-        deleteSubtree(node->childFalse);
-        node->childFalse = DUMMY;
-    }
-
-    // Climb up until a node where both children are not DUMMY
-    Node* cur = node;
-    Node* parent = cur->parent;
-    bool cameFromTrue = false;
-
-    if (parent) {
-        cameFromTrue = (parent->childTrue == cur);
-    }
-
-    while (parent) {
-        bool tDummy = (parent->childTrue == DUMMY);
-        bool fDummy = (parent->childFalse == DUMMY);
-
-        // If both children are not DUMMY, stop
-        if (!tDummy && !fDummy) break;
-
-        // Replace branch we came from with DUMMY
-        if (cameFromTrue) {
-            parent->childTrue = DUMMY;
-        } else {
-            parent->childFalse = DUMMY;
-        }
-
-        cur = parent;
-        parent = cur->parent;
-        if (parent) {
-            cameFromTrue = (parent->childTrue == cur);
-        }
-    }
-
-    // If we reached root and it became degenerate, we leave it as is
-}
-
-// Pretty-print pseudo-tree
-void printTree(Node* node, int depth = 0, bool isRoot = false) {
+void printNode(Node* node, const string& prefix) {
     if (!node) {
-        std::cout << "null\n";
+        cout << prefix << "null\n";
+        return;
+    }
+    if (node->isDummy) {
+        cout << prefix << "dummy\n";
         return;
     }
 
-    if (isRoot) {
-        std::cout << "Pseudo-tree:\n";
-        std::cout << "x" << node->varIndex << "\n";
+    cout << prefix << "x" << node->varIndex << "\n";
+
+    cout << prefix << "  F-> ";
+    if (!node->childFalse) {
+        cout << "null\n";
+    } else if (node->childFalse->isDummy) {
+        cout << "dummy\n";
+    } else {
+        cout << "x" << node->childFalse->varIndex << "\n";
+        printNode(node->childFalse, prefix + "    ");
     }
 
-    auto printChild = [&](const char* label, Node* child, int depth) {
-        for (int i = 0; i < depth; ++i) std::cout << "  ";
-        std::cout << label << " ";
-
-        if (!child) {
-            std::cout << "null\n";
-        } else if (child == DUMMY) {
-            std::cout << "null (dummy)\n";
-        } else if (!child->childTrue && !child->childFalse) {
-            std::cout << "x" << child->varIndex << " (leaf)\n";
-        } else {
-            std::cout << "x" << child->varIndex << "\n";
-            printTree(child, depth + 1, false);
-        }
-    };
-
-    printChild("F->", node->childFalse, depth + 1);
-    printChild("T->", node->childTrue, depth + 1);
+    cout << prefix << "  T-> ";
+    if (!node->childTrue) {
+        cout << "null\n";
+    } else if (node->childTrue->isDummy) {
+        cout << "dummy\n";
+    } else {
+        cout << "x" << node->childTrue->varIndex << "\n";
+        printNode(node->childTrue, prefix + "    ");
+    }
 }
 
-// ---------- Core insertion logic ----------
+void printTree(Node* root) {
+    cout << "Pseudo-tree:\n";
+    if (!root) {
+        cout << "null\n";
+        return;
+    }
+    printNode(root, "");
+}
 
-struct Literal {
-    int var;       // variable index
-    bool positive; // true if literal is positive, false if negated
-};
+// ========================= INSERTION LOGIC =========================
 
-// Forward declaration
-void insertClauseFromPos(Node*& subtreeRoot,
-                         Node* parent,
-                         const std::vector<Literal>& clause,
-                         size_t pos,
-                         bool cameFromTrueBranch);
+void insertLiteral(Node*& subtreeRoot,
+                   int litIndex,
+                   bool isPositive,
+                   bool isLastLiteral,
+                   const vector<int>& clause,
+                   const vector<bool>& clauseSign,
+                   size_t posInClause);
 
-// Insert literal at current position (and possibly following literals)
-void insertSingleLiteral(Node*& subtreeRoot,
-                         Node* parent,
-                         const std::vector<Literal>& clause,
-                         size_t pos,
-                         bool cameFromTrueBranch) {
-    const Literal& lit = clause[pos];
-    int insertIdx = lit.var;
-    bool isLast = (pos + 1 == clause.size());
+void insertLastLiteral(Node*& subtreeRoot, int litIndex, bool isPositive) {
+    Node* n = new Node(litIndex, false);
+    n->parent = nullptr;
 
-    // If subtree is empty: insert here
+    if (isPositive) {
+        n->childTrue = nullptr;    // path possible
+        n->childFalse = dummyNode; // impossible
+    } else {
+        n->childFalse = nullptr;
+        n->childTrue = dummyNode;
+    }
+
+    subtreeRoot = n;
+}
+
+void insertNonLastLiteral(Node*& subtreeRoot,
+                          int litIndex,
+                          bool isPositive,
+                          const vector<int>& clause,
+                          const vector<bool>& clauseSign,
+                          size_t posInClause) {
+    Node* n = new Node(litIndex, false);
+    n->parent = nullptr;
+
+    // both branches exist; subtree below is currently null
+    n->childTrue = nullptr;
+    n->childFalse = nullptr;
+
+    subtreeRoot = n;
+
+    size_t nextPos = posInClause + 1;
+    if (nextPos < clause.size()) {
+        int nextLit = abs(clause[nextPos]);
+        bool nextSign = clause[nextPos] > 0;
+        bool nextIsLast = (nextPos == clause.size() - 1);
+
+        // for positive literal: next literals go down childFalse
+        // for negative literal: next literals go down childTrue
+        if (isPositive) {
+            insertLiteral(n->childFalse, nextLit, nextSign,
+                          nextIsLast, clause, clauseSign, nextPos);
+        } else {
+            insertLiteral(n->childTrue, nextLit, nextSign,
+                          nextIsLast, clause, clauseSign, nextPos);
+        }
+    }
+}
+
+void insertLiteral(Node*& subtreeRoot,
+                   int litIndex,
+                   bool isPositive,
+                   bool isLastLiteral,
+                   const vector<int>& clause,
+                   const vector<bool>& clauseSign,
+                   size_t posInClause) {
+    // impossible path
+    if (subtreeRoot && subtreeRoot->isDummy) return;
+
+    // null -> insert here
     if (!subtreeRoot) {
-        Node* newNode = new Node(insertIdx);
-        newNode->parent = parent;
+        if (isLastLiteral)
+            insertLastLiteral(subtreeRoot, litIndex, isPositive);
+        else
+            insertNonLastLiteral(subtreeRoot, litIndex, isPositive,
+                                 clause, clauseSign, posInClause);
+        return;
+    }
 
-        if (isLast) {
-            // Last literal: children depend on sign, subtreeBelow is null here
-            Node* subtreeBelow = nullptr;
-            if (lit.positive) {
-                newNode->childTrue  = subtreeBelow; // leaf
-                newNode->childFalse = DUMMY;
+    // insert before current node
+    if (subtreeRoot->varIndex > litIndex) {
+        Node* n = new Node(litIndex, false);
+        n->parent = subtreeRoot->parent;
+
+        if (isLastLiteral) {
+            if (isPositive) {
+                n->childTrue = subtreeRoot;
+                n->childFalse = dummyNode;
             } else {
-                newNode->childFalse = subtreeBelow; // leaf
-                newNode->childTrue  = DUMMY;
+                n->childFalse = subtreeRoot;
+                n->childTrue = dummyNode;
             }
+            subtreeRoot->parent = n;
         } else {
-            // Non-last: both children exist and point to same subtree (null here)
-            Node* subtreeBelow = nullptr;
-            newNode->childTrue  = subtreeBelow;
-            newNode->childFalse = cloneSubtree(subtreeBelow, newNode);
-        }
+            // non-last: both branches exist
+            // childTrue -> original subtree
+            n->childTrue = subtreeRoot;
+            subtreeRoot->parent = n;
+            // childFalse -> deep copy of subtree
+            n->childFalse = deepCopy(subtreeRoot, n);
 
-        subtreeRoot = newNode;
+            size_t nextPos = posInClause + 1;
+            if (nextPos < clause.size()) {
+                int nextLit = abs(clause[nextPos]);
+                bool nextSign = clause[nextPos] > 0;
+                bool nextIsLast = (nextPos == clause.size() - 1);
 
-        // If not last, insert following literals down appropriate branch
-        if (!isLast) {
-            bool goDownFalse = lit.positive; // positive -> next literals go to childFalse
-            Node*& nextBranch = goDownFalse ? newNode->childFalse : newNode->childTrue;
-            insertClauseFromPos(nextBranch, newNode, clause, pos + 1, !goDownFalse);
-        }
-        return;
-    }
-
-    // If branching node: both children exist and are not DUMMY -> insert into both
-    bool hasTrue = (subtreeRoot->childTrue && subtreeRoot->childTrue != DUMMY);
-    bool hasFalse = (subtreeRoot->childFalse && subtreeRoot->childFalse != DUMMY);
-    if (hasTrue && hasFalse) {
-        insertClauseFromPos(subtreeRoot->childTrue, subtreeRoot, clause, pos, true);
-        insertClauseFromPos(subtreeRoot->childFalse, subtreeRoot, clause, pos, false);
-        return;
-    }
-
-    // Single-path node
-    if (insertIdx == subtreeRoot->varIndex) {
-        // Node with this literal already exists
-        if (isLast) {
-            // Last literal: check conflict rules
-            if (!lit.positive) {
-                // Literal is negated in clause -> check childFalse
-                if (subtreeRoot->childFalse == DUMMY) {
-                    // Conflict: delete subtree below childTrue and prune upwards
-                    handleConflict(subtreeRoot, true);
-                }
-            } else {
-                // Positive literal -> check childTrue (symmetrical)
-                if (subtreeRoot->childTrue == DUMMY) {
-                    handleConflict(subtreeRoot, false);
+                if (isPositive) {
+                    insertLiteral(n->childFalse, nextLit, nextSign,
+                                  nextIsLast, clause, clauseSign, nextPos);
+                } else {
+                    insertLiteral(n->childTrue, nextLit, nextSign,
+                                  nextIsLast, clause, clauseSign, nextPos);
                 }
             }
-        } else {
-            // Non-last literal already exists: ensure both children exist, then go down
-            if (!subtreeRoot->childTrue && !subtreeRoot->childFalse) {
-                Node* baseSubtree = nullptr;
-                subtreeRoot->childTrue  = baseSubtree;
-                subtreeRoot->childFalse = cloneSubtree(baseSubtree, subtreeRoot);
-            }
-
-            bool goDownFalse = lit.positive;
-            Node*& nextBranch = goDownFalse ? subtreeRoot->childFalse : subtreeRoot->childTrue;
-            insertClauseFromPos(nextBranch, subtreeRoot, clause, pos + 1, !goDownFalse);
         }
+
+        subtreeRoot = n;
         return;
     }
 
-    // Need to insert before or after current node, respecting sorted order
-    if (insertIdx < subtreeRoot->varIndex) {
-        // Insert new node before current subtreeRoot
-        Node* newNode = new Node(insertIdx);
-        newNode->parent = parent;
+    // go down
+    if (subtreeRoot->varIndex < litIndex) {
+        bool hasBoth =
+            subtreeRoot->childTrue &&
+            !subtreeRoot->childTrue->isDummy &&
+            subtreeRoot->childFalse &&
+            !subtreeRoot->childFalse->isDummy;
 
-        Node* subtreeBelow = subtreeRoot;
+        // branching: insert into both
+        if (hasBoth) {
+            insertLiteral(subtreeRoot->childTrue,
+                          litIndex, isPositive, isLastLiteral,
+                          clause, clauseSign, posInClause);
+            insertLiteral(subtreeRoot->childFalse,
+                          litIndex, isPositive, isLastLiteral,
+                          clause, clauseSign, posInClause);
+            return;
+        } else {
+            // go down existing non-dummy branches
+            if (subtreeRoot->childTrue &&
+                !subtreeRoot->childTrue->isDummy) {
+                insertLiteral(subtreeRoot->childTrue,
+                              litIndex, isPositive, isLastLiteral,
+                              clause, clauseSign, posInClause);
+            }
+            if (subtreeRoot->childFalse &&
+                !subtreeRoot->childFalse->isDummy) {
+                insertLiteral(subtreeRoot->childFalse,
+                              litIndex, isPositive, isLastLiteral,
+                              clause, clauseSign, posInClause);
+            }
+            return;
+        }
+    }
 
-        if (isLast) {
-            if (lit.positive) {
-                newNode->childTrue  = subtreeBelow;
-                newNode->childFalse = DUMMY;
+    // same index
+    if (subtreeRoot->varIndex == litIndex) {
+
+        // last literal: conflict handling only for negative
+        if (isLastLiteral) {
+            if (!isPositive) {
+                if (subtreeRoot->childFalse == dummyNode) {
+                    // conflict: delete subtree below childTrue
+                    deleteSubtree(subtreeRoot->childTrue);
+                    subtreeRoot->childTrue = dummyNode;
+
+                    // delete upwards until node with both children != dummy
+                    Node* cur = subtreeRoot->parent;
+                    Node* child = subtreeRoot;
+
+                    while (cur) {
+                        bool bothNotDummy =
+                            (cur->childTrue != dummyNode) &&
+                            (cur->childFalse != dummyNode);
+
+                        if (bothNotDummy) {
+                            if (cur->childTrue == child)
+                                cur->childTrue = dummyNode;
+                            else
+                                cur->childFalse = dummyNode;
+                            break;
+                        } else {
+                            if (cur->childTrue == child) {
+                                deleteSubtree(cur->childTrue);
+                                cur->childTrue = dummyNode;
+                            } else {
+                                deleteSubtree(cur->childFalse);
+                                cur->childFalse = dummyNode;
+                            }
+                            child = cur;
+                            cur = cur->parent;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // non-last literal: node exists -> continue with next literal
+        size_t nextPos = posInClause + 1;
+        if (nextPos < clause.size()) {
+            int nextLit = abs(clause[nextPos]);
+            bool nextSign = clause[nextPos] > 0;
+            bool nextIsLast = (nextPos == clause.size() - 1);
+
+            // for positive: next literals go down childFalse
+            // for negative: next literals go down childTrue
+            if (isPositive) {
+                insertLiteral(subtreeRoot->childFalse,
+                              nextLit, nextSign,
+                              nextIsLast, clause, clauseSign, nextPos);
             } else {
-                newNode->childFalse = subtreeBelow;
-                newNode->childTrue  = DUMMY;
+                insertLiteral(subtreeRoot->childTrue,
+                              nextLit, nextSign,
+                              nextIsLast, clause, clauseSign, nextPos);
             }
-            subtreeBelow->parent = newNode;
-        } else {
-            newNode->childTrue  = subtreeBelow;
-            subtreeBelow->parent = newNode;
-            newNode->childFalse = cloneSubtree(subtreeBelow, newNode);
-        }
-
-        subtreeRoot = newNode;
-
-        if (!isLast) {
-            bool goDownFalse = lit.positive;
-            Node*& nextBranch = goDownFalse ? newNode->childFalse : newNode->childTrue;
-            insertClauseFromPos(nextBranch, newNode, clause, pos + 1, !goDownFalse);
         }
         return;
     }
-
-    // insertIdx > subtreeRoot->varIndex: continue search down the path
-    Node*& next = cameFromTrueBranch ? subtreeRoot->childTrue : subtreeRoot->childFalse;
-    insertSingleLiteral(next, subtreeRoot, clause, pos, cameFromTrueBranch);
 }
 
-// Wrapper: insert literal and all following literals starting at pos
-void insertClauseFromPos(Node*& subtreeRoot,
-                         Node* parent,
-                         const std::vector<Literal>& clause,
-                         size_t pos,
-                         bool cameFromTrueBranch) {
-    if (pos >= clause.size()) return;
-    insertSingleLiteral(subtreeRoot, parent, clause, pos, cameFromTrueBranch);
-}
+// ========================= CNF PARSER =========================
 
-// Process one clause
-void processClause(const std::vector<Literal>& clause) {
-    if (clause.empty()) return;
-    insertClauseFromPos(root, nullptr, clause, 0, false);
-}
-
-// ---------- DIMACS CNF parsing ----------
-
-bool parseCNF(const std::string& filename,
-              int& numVars,
-              int& numClauses,
-              std::vector<std::vector<Literal>>& clauses) {
-    std::ifstream in(filename);
-    if (!in) {
-        std::cerr << "Error: cannot open file " << filename << "\n";
+bool readCNF(const string& filename,
+             int& numVars,
+             int& numClauses,
+             vector<vector<int>>& clauses) {
+    ifstream in(filename);
+    if (!in.is_open()) {
+        cerr << "Error: cannot open file " << filename << endl;
         return false;
     }
 
-    std::string line;
-    numVars = 0;
-    numClauses = 0;
-
-    // Read header
-    while (std::getline(in, line)) {
+    string line;
+    while (getline(in, line)) {
         if (line.empty()) continue;
         if (line[0] == 'c') continue;
         if (line[0] == 'p') {
-            std::stringstream ss(line);
-            std::string tmp;
-            ss >> tmp; // p
-            ss >> tmp; // cnf
-            ss >> numVars >> numClauses;
-            break;
+            string tmp, fmt;
+            stringstream ss(line);
+            ss >> tmp >> fmt >> numVars >> numClauses;
+            continue;
         }
-    }
 
-    // Read clauses
-    while (std::getline(in, line)) {
-        if (line.empty() || line[0] == 'c') continue;
-        std::stringstream ss(line);
+        stringstream ss(line);
         int lit;
-        std::vector<Literal> clause;
+        vector<int> clause;
         while (ss >> lit) {
             if (lit == 0) break;
-            Literal L;
-            L.positive = (lit > 0);
-            L.var = std::abs(lit);
-            clause.push_back(L);
+            clause.push_back(lit);
         }
-        if (!clause.empty()) {
+        if (!clause.empty())
             clauses.push_back(clause);
-        }
     }
-
     return true;
 }
 
-// ---------- main ----------
+// ========================= MAIN =========================
 
 int main() {
     int numVars = 0, numClauses = 0;
-    std::vector<std::vector<Literal>> clauses;
+    vector<vector<int>> clauses;
 
-    if (!parseCNF("test_cases/test_sat.cnf", numVars, numClauses, clauses)) {
+    if (!readCNF("test_cases/test_sat.cnf", numVars, numClauses, clauses))
         return 1;
-    }
 
-    // Initially, root is null
-    root = nullptr;
-
-    // Process each clause
     for (const auto& clause : clauses) {
-        processClause(clause);
+        vector<bool> clauseSign(clause.size());
+        for (size_t i = 0; i < clause.size(); ++i)
+            clauseSign[i] = clause[i] > 0;
+
+        for (size_t i = 0; i < clause.size(); ++i) {
+            int litIndex = abs(clause[i]);
+            bool isPositive = clause[i] > 0;
+            bool isLast = (i == clause.size() - 1);
+
+            insertLiteral(root, litIndex, isPositive,
+                          isLast, clause, clauseSign, i);
+        }
     }
 
-    // Print resulting pseudo-tree
-    if (!root) {
-        std::cout << "Pseudo-tree:\nnull\n";
-    } else {
-        printTree(root, 0, true);
-    }
+    printTree(root);
 
-    // Cleanup
     deleteSubtree(root);
-    delete DUMMY;
-
+    delete dummyNode;
     return 0;
 }
