@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
-#include "sorting_clauses.h"
+#include "sorting_clauses_min_index.h"
 
 struct Node {
     int varIndex;
@@ -16,7 +16,6 @@ struct Node {
         : varIndex(v), parent(nullptr), childTrue(nullptr), childFalse(nullptr) {}
 };
 
-// Global dummy node: represents impossible branch
 Node* dummyNode = new Node(-1);
 
 struct Literal {
@@ -25,12 +24,9 @@ struct Literal {
     bool isLast;
 };
 
-// -----------------------------------------------------------------------------
-// Deep copy of subtree. dummyNode is shared singleton and never copied.
-// -----------------------------------------------------------------------------
 Node* deepCopy(Node* root, Node* parent = nullptr) {
     if (!root || root == dummyNode)
-        return root; // keep nullptr or dummyNode as is
+        return root;
 
     Node* copy = new Node(root->varIndex);
     copy->parent = parent;
@@ -41,10 +37,6 @@ Node* deepCopy(Node* root, Node* parent = nullptr) {
     return copy;
 }
 
-// -----------------------------------------------------------------------------
-// Delete subtree safely. Never delete dummyNode.
-// Используется для финальной очистки и при локальном удалении узла.
-// -----------------------------------------------------------------------------
 void deleteSubtree(Node* root) {
     if (!root || root == dummyNode) return;
 
@@ -54,58 +46,45 @@ void deleteSubtree(Node* root) {
     root->childTrue  = nullptr;
     root->childFalse = nullptr;
 
-    if (t && t != dummyNode) {
-        deleteSubtree(t);
-    }
-    if (f && f != dummyNode) {
-        deleteSubtree(f);
-    }
+    if (t && t != dummyNode) deleteSubtree(t);
+    if (f && f != dummyNode) deleteSubtree(f);
 
     delete root;
 }
 
 // -----------------------------------------------------------------------------
-// Поднимаемся вверх и удаляем узлы, у которых обе ветки dummyNode.
-// Останавливаемся на первом родителе, у которого обе ветки не dummyNode.
-// У него ветку, по которой пришли, заменяем на dummyNode.
-// Если дошли до корня — заменяем корень на dummyNode.
+// pruneUp: removes a node, prunes up while the parent is also empty
 // -----------------------------------------------------------------------------
 void pruneUp(Node* node, Node*& root) {
     while (node) {
-        // Если у узла хотя бы одна ветка не dummyNode — дальше не удаляем
-        if (!(node->childTrue == dummyNode && node->childFalse == dummyNode)) {
-            break;
-        }
+        bool bothDummy = (node->childTrue == dummyNode && node->childFalse == dummyNode);
+
+        if (!bothDummy)
+            return;
 
         Node* parent = node->parent;
 
-        if (parent) {
-            // Заменяем ссылку у родителя на dummyNode
-            if (parent->childTrue == node) {
-                parent->childTrue = dummyNode;
-            } else if (parent->childFalse == node) {
-                parent->childFalse = dummyNode;
-            }
-        } else {
-            // Это корень
+        if (!parent) {
+            deleteSubtree(node);
             root = dummyNode;
+            return;
         }
 
-        // Удаляем сам узел
+        bool isTrue = (parent->childTrue == node);
+
         deleteSubtree(node);
 
-        // Поднимаемся выше
+        if (isTrue) parent->childTrue = dummyNode;
+        else        parent->childFalse = dummyNode;
+
         node = parent;
     }
 }
 
-// -----------------------------------------------------------------------------
-// Print pseudo-tree in required format
-// -----------------------------------------------------------------------------
 void printTree(Node* root) {
     std::cout << "Pseudo-tree:\n";
     if (!root || root == dummyNode) {
-        std::cout << "null\n";
+        std::cout << "dummyNode\n";
         return;
     }
 
@@ -133,61 +112,47 @@ void printTree(Node* root) {
     printChildren(root, 2);
 }
 
-// -----------------------------------------------------------------------------
-// Resolve conflict for last literal: удаляем конфликтующую ветку,
-// помечаем её dummyNode, затем запускаем pruneUp.
-// -----------------------------------------------------------------------------
 void resolveConflictLastLiteral(Node* node, bool isNeg, Node*& root) {
     if (!node || node == dummyNode) return;
 
     if (isNeg) {
-        // Конфликт по отрицательному литералу: ветка childTrue невозможна
-        if (node->childTrue && node->childTrue != dummyNode) {
+        if (node->childTrue && node->childTrue != dummyNode)
             deleteSubtree(node->childTrue);
-        }
         node->childTrue = dummyNode;
     } else {
-        // Конфликт по положительному литералу: ветка childFalse невозможна
-        if (node->childFalse && node->childFalse != dummyNode) {
+        if (node->childFalse && node->childFalse != dummyNode)
             deleteSubtree(node->childFalse);
-        }
         node->childFalse = dummyNode;
     }
 
-    // Если обе ветки стали dummyNode — запускаем удаление вверх
     pruneUp(node, root);
 }
 
-// -----------------------------------------------------------------------------
-// Insert sequence of literals starting from given node
-// -----------------------------------------------------------------------------
 void insertSequenceFrom(Node*& current,
                         Node* parent,
                         const std::vector<Literal>& clause,
                         int idx,
                         Node*& root) {
+    if (root == dummyNode) return;
     if (idx >= (int)clause.size()) return;
     if (current == dummyNode) return;
 
     const Literal& lit = clause[idx];
     bool isLast = lit.isLast;
 
-    // Если текущий узел отсутствует: создаём новый
     if (!current) {
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
 
         if (isLast) {
-            // Последний литерал: ветки по знаку
             if (lit.isNeg) {
-                newNode->childFalse = nullptr;   // лист, путь возможен
-                newNode->childTrue  = dummyNode; // путь невозможен
+                newNode->childFalse = nullptr;
+                newNode->childTrue  = dummyNode;
             } else {
-                newNode->childTrue  = nullptr;   // лист, путь возможен
-                newNode->childFalse = dummyNode; // путь невозможен
+                newNode->childTrue  = nullptr;
+                newNode->childFalse = dummyNode;
             }
         } else {
-            // Непоследний: обе ветки существуют, но пока пустые
             newNode->childTrue  = nullptr;
             newNode->childFalse = nullptr;
         }
@@ -202,54 +167,41 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
-    // Тот же индекс переменной
     if (lit.var == current->varIndex) {
         if (isLast) {
-            // Последний литерал: проверка конфликтов
             if (lit.isNeg) {
-                if (current->childFalse == dummyNode) {
-                    // Конфликт: отрицательный литерал, но false-ветка невозможна
+                if (current->childFalse == dummyNode)
                     resolveConflictLastLiteral(current, true, root);
-                } else {
-                    // Запрещаем true-ветку
-                    if (current->childTrue && current->childTrue != dummyNode) {
+                else {
+                    if (current->childTrue && current->childTrue != dummyNode)
                         deleteSubtree(current->childTrue);
-                    }
                     current->childTrue = dummyNode;
-                    // Если обе ветки dummyNode — поднимаемся вверх
                     pruneUp(current, root);
                 }
             } else {
-                if (current->childTrue == dummyNode) {
-                    // Конфликт: положительный литерал, но true-ветка невозможна
+                if (current->childTrue == dummyNode)
                     resolveConflictLastLiteral(current, false, root);
-                } else {
-                    // Запрещаем false-ветку
-                    if (current->childFalse && current->childFalse != dummyNode) {
+                else {
+                    if (current->childFalse && current->childFalse != dummyNode)
                         deleteSubtree(current->childFalse);
-                    }
                     current->childFalse = dummyNode;
-                    // Если обе ветки dummyNode — поднимаемся вверх
                     pruneUp(current, root);
                 }
             }
         } else {
-            // Непоследний: идём по соответствующей ветке
             Node*& nextBranch = lit.isNeg ? current->childTrue : current->childFalse;
-            if (nextBranch == dummyNode) return; // путь невозможен, прекращаем обработку клаузы
+            if (nextBranch == dummyNode) return;
             insertSequenceFrom(nextBranch, current, clause, idx + 1, root);
         }
         return;
     }
 
-    // Вставка нового узла перед текущим (lit.var < current->varIndex)
     if (lit.var < current->varIndex) {
         Node* old = current;
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
 
         if (isLast) {
-            // Последний литерал: одна ветка указывает на старое поддерево, другая на dummy
             if (lit.isNeg) {
                 newNode->childFalse = old;
                 newNode->childTrue  = dummyNode;
@@ -259,8 +211,6 @@ void insertSequenceFrom(Node*& current,
             }
             old->parent = newNode;
         } else {
-            // Непоследний: обе ветки существуют,
-            // одна — оригинальное поддерево, другая — его глубокая копия
             newNode->childTrue  = old;
             newNode->childFalse = deepCopy(old, newNode);
             old->parent = newNode;
@@ -281,44 +231,33 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
-    // lit.var > current->varIndex → поиск дальше по дереву
     bool canTrue  = (current->childTrue  != dummyNode);
     bool canFalse = (current->childFalse != dummyNode);
 
-    // Если обе ветки возможны, вставляем в обе
     if (canTrue && canFalse) {
         insertSequenceFrom(current->childFalse, current, clause, idx, root);
         insertSequenceFrom(current->childTrue,  current, clause, idx, root);
         return;
     }
 
-    // Только false-ветка возможна
     if (canFalse && (!current->childTrue || current->childTrue == dummyNode)) {
         insertSequenceFrom(current->childFalse, current, clause, idx, root);
         return;
     }
 
-    // Только true-ветка возможна
     if (canTrue && (!current->childFalse || current->childFalse == dummyNode)) {
         insertSequenceFrom(current->childTrue, current, clause, idx, root);
         return;
     }
 
-    // Обе ветки невозможны → прекращаем
     return;
 }
 
-// -----------------------------------------------------------------------------
-// Insert whole clause starting from root
-// -----------------------------------------------------------------------------
 void insertClause(Node*& root, const std::vector<Literal>& clause) {
     if (clause.empty()) return;
     insertSequenceFrom(root, nullptr, clause, 0, root);
 }
 
-// -----------------------------------------------------------------------------
-// Parse CNF file into clauses of Literals
-// -----------------------------------------------------------------------------
 bool parseCNF(const std::string& filename,
               std::vector<std::vector<Literal>>& clauses) {
     std::ifstream in(filename);
@@ -357,17 +296,17 @@ bool parseCNF(const std::string& filename,
     return true;
 }
 
-// -----------------------------------------------------------------------------
-// Main
-// -----------------------------------------------------------------------------
 int main() {
     Node* root = nullptr;
 
-    // std::string filename = "test_sat.cnf";
-    std::string filename = "uuf50-01.cnf";
+    // std::string filename    = "test_sat.cnf";
     // std::string filename    = "uf20-01.cnf";
     // std::string filename    = "uf20-05.cnf";
+    std::string filename    = "uuf50-01.cnf";
+    // std::string filename    = "uf75-098.cnf";
     // std::string filename    = "uuf75-097.cnf";
+
+    
     std::string folder_name = "test_cases/";
 
     sort_clauses(folder_name, filename);
@@ -377,7 +316,15 @@ int main() {
         return 1;
     }
 
+
+    long long total = clauses.size();
+    long long index = 1;
+
     for (const auto& clause : clauses) {
+
+        std::cout << "Clause " << index << "/" << total << "    ";
+        index++;
+
         insertClause(root, clause);
         std::cout << "Inserted clause: ";
         for (const auto& lit : clause) {
@@ -389,7 +336,9 @@ int main() {
     std::cout << "Constructed pseudo-tree:\n\n";
     printTree(root);
 
-    deleteSubtree(root);
+    if (root != dummyNode)
+        deleteSubtree(root);
+
     delete dummyNode;
 
     return 0;
