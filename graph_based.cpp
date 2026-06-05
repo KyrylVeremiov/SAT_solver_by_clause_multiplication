@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <set>
 #include "sorting_clauses.h"
 
 struct Node {
@@ -24,8 +25,10 @@ struct Literal {
     bool isLast;
 };
 
+// deepCopy: создаём полностью новые узлы (кроме общего dummyNode)
 Node* deepCopy(Node* root, Node* parent = nullptr) {
-    if (!root || root == dummyNode) return root;
+    if (!root || root == dummyNode) return dummyNode;
+
     Node* copy = new Node(root->varIndex);
     copy->parent = parent;
     copy->childTrue = deepCopy(root->childTrue, copy);
@@ -105,12 +108,14 @@ void resolveConflictLastLiteral(Node* node, bool isNeg) {
         Node* grand = parent->parent;
 
         if (grand) {
-            if (grand->childTrue == parent) {
+            if (grand->childTrue == parent)
                 grand->childTrue = dummyNode;
-            } else if (grand->childFalse == parent) {
+            else if (grand->childFalse == parent)
                 grand->childFalse = dummyNode;
-            }
         }
+
+        if (child && child->parent == parent)
+            child->parent = grand;
 
         deleteSubtree(parent);
 
@@ -118,6 +123,9 @@ void resolveConflictLastLiteral(Node* node, bool isNeg) {
         parent = grand;
     }
 }
+
+// visited только для ветвления, чтобы избежать бесконечной рекурсии
+std::set<std::pair<Node*, int>> visited;
 
 void insertSequenceFrom(Node*& current,
                         Node* parent,
@@ -159,22 +167,16 @@ void insertSequenceFrom(Node*& current,
     if (lit.var == current->varIndex) {
         if (isLast) {
             if (lit.isNeg) {
-                // Last literal is negated: satisfying branch is childFalse
                 if (current->childFalse == dummyNode) {
-                    // Conflict: satisfying branch already impossible
                     resolveConflictLastLiteral(current, true);
                 } else {
-                    // Normal case: forbid True, delete subtree below childTrue
                     deleteSubtree(current->childTrue);
                     current->childTrue = dummyNode;
                 }
             } else {
-                // Last literal is positive: satisfying branch is childTrue
                 if (current->childTrue == dummyNode) {
-                    // Conflict: satisfying branch already impossible
                     resolveConflictLastLiteral(current, false);
                 } else {
-                    // Normal case: forbid False, delete subtree below childFalse
                     deleteSubtree(current->childFalse);
                     current->childFalse = dummyNode;
                 }
@@ -188,21 +190,27 @@ void insertSequenceFrom(Node*& current,
     }
 
     if (lit.var < current->varIndex) {
+        Node* old = current;
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
 
         if (isLast) {
             if (lit.isNeg) {
-                newNode->childFalse = current;
+                newNode->childFalse = old;
                 newNode->childTrue = dummyNode;
             } else {
-                newNode->childTrue = current;
+                newNode->childTrue = old;
                 newNode->childFalse = dummyNode;
             }
         } else {
-            newNode->childTrue = current;
-            newNode->childFalse = deepCopy(current, newNode);
-            current->parent = newNode;
+            newNode->childTrue = old;
+            newNode->childFalse = deepCopy(old, newNode);
+            old->parent = newNode;
+        }
+
+        if (parent) {
+            if (parent->childTrue == old) parent->childTrue = newNode;
+            else if (parent->childFalse == old) parent->childFalse = newNode;
         }
 
         current = newNode;
@@ -218,9 +226,14 @@ void insertSequenceFrom(Node*& current,
     bool canTrue = (current->childTrue != dummyNode);
     bool canFalse = (current->childFalse != dummyNode);
 
-    if (canTrue && canFalse) {
+    // разветвление только при поиске места для текущего литерала
+    if (canTrue && canFalse && lit.var > current->varIndex) {
+        // защита от повторного ветвления на том же узле и том же литерале
+        if (visited.count({current, idx})) return;
+        visited.insert({current, idx});
+
         insertSequenceFrom(current->childFalse, current, clause, idx);
-        insertSequenceFrom(current->childTrue, current, clause, idx);
+        insertSequenceFrom(current->childTrue,  current, clause, idx);
         return;
     }
 
@@ -238,6 +251,7 @@ void insertSequenceFrom(Node*& current,
 
 void insertClause(Node*& root, const std::vector<Literal>& clause) {
     if (clause.empty()) return;
+    visited.clear();  // сбрасываем посещённые узлы для новой клаузы
     insertSequenceFrom(root, nullptr, clause, 0);
 }
 
@@ -282,22 +296,29 @@ bool parseCNF(const std::string& filename,
 int main() {
     Node* root = nullptr;
 
-    // string filename = "test_sat.cnf";
-    string filename = "uuf75-097.cnf";
-    // string filename = "uf75-098.cnf";
-    string folder_name = "test_cases/";
+    std::string filename = "test_sat.cnf";
+    // std::string filename = "uf20-01.cnf";
+    // std::string filename = "uf75-098.cnf";
+
+    std::string folder_name = "test_cases/";
 
     sort_clauses(folder_name, filename);
 
     std::vector<std::vector<Literal>> clauses;
-    if (!parseCNF(folder_name +"sorted_" + filename, clauses)) {
+    if (!parseCNF(folder_name + "sorted_" + filename, clauses)) {
         return 1;
     }
 
     for (const auto& clause : clauses) {
         insertClause(root, clause);
+        std::cout << "Inserted clause: ";
+        for (const auto& lit : clause) {
+            std::cout << (lit.isNeg ? "-" : "") << "x" << lit.var << " ";
+        }
+        std::cout << "\n";
     }
 
+    std::cout << "Constructed pseudo-tree:\n\n";
     printTree(root);
 
     deleteSubtree(root);
