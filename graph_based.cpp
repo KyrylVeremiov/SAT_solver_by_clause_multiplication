@@ -25,14 +25,19 @@ struct Literal {
     bool isLast;
 };
 
-// deepCopy: создаём полностью новые узлы (кроме общего dummyNode)
+// -----------------------------------------------------------------------------
+// Correct deepCopy: creates a fully independent subtree with correct parent links
+// -----------------------------------------------------------------------------
 Node* deepCopy(Node* root, Node* parent = nullptr) {
-    if (!root || root == dummyNode) return dummyNode;
+    if (!root || root == dummyNode)
+        return dummyNode;
 
     Node* copy = new Node(root->varIndex);
     copy->parent = parent;
-    copy->childTrue = deepCopy(root->childTrue, copy);
+
+    copy->childTrue  = deepCopy(root->childTrue,  copy);
     copy->childFalse = deepCopy(root->childFalse, copy);
+
     return copy;
 }
 
@@ -124,7 +129,6 @@ void resolveConflictLastLiteral(Node* node, bool isNeg) {
     }
 }
 
-// visited только для ветвления, чтобы избежать бесконечной рекурсии
 std::set<std::pair<Node*, int>> visited;
 
 void insertSequenceFrom(Node*& current,
@@ -137,6 +141,14 @@ void insertSequenceFrom(Node*& current,
     const Literal& lit = clause[idx];
     bool isLast = lit.isLast;
 
+    // Prevent structural cycles
+    if (current) {
+        auto key = std::make_pair(current, idx);
+        if (visited.count(key)) return;
+        visited.insert(key);
+    }
+
+    // Create new node
     if (!current) {
         Node* newNode = new Node(lit.var);
         newNode->parent = parent;
@@ -164,19 +176,20 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
+    // Same variable
     if (lit.var == current->varIndex) {
         if (isLast) {
             if (lit.isNeg) {
-                if (current->childFalse == dummyNode) {
+                if (current->childFalse == dummyNode)
                     resolveConflictLastLiteral(current, true);
-                } else {
+                else {
                     deleteSubtree(current->childTrue);
                     current->childTrue = dummyNode;
                 }
             } else {
-                if (current->childTrue == dummyNode) {
+                if (current->childTrue == dummyNode)
                     resolveConflictLastLiteral(current, false);
-                } else {
+                else {
                     deleteSubtree(current->childFalse);
                     current->childFalse = dummyNode;
                 }
@@ -189,6 +202,7 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
+    // Insert new variable before current
     if (lit.var < current->varIndex) {
         Node* old = current;
         Node* newNode = new Node(lit.var);
@@ -223,15 +237,11 @@ void insertSequenceFrom(Node*& current,
         return;
     }
 
+    // lit.var > current->varIndex → search phase
     bool canTrue = (current->childTrue != dummyNode);
     bool canFalse = (current->childFalse != dummyNode);
 
-    // разветвление только при поиске места для текущего литерала
-    if (canTrue && canFalse && lit.var > current->varIndex) {
-        // защита от повторного ветвления на том же узле и том же литерале
-        if (visited.count({current, idx})) return;
-        visited.insert({current, idx});
-
+    if (canTrue && canFalse) {
         insertSequenceFrom(current->childFalse, current, clause, idx);
         insertSequenceFrom(current->childTrue,  current, clause, idx);
         return;
@@ -251,7 +261,7 @@ void insertSequenceFrom(Node*& current,
 
 void insertClause(Node*& root, const std::vector<Literal>& clause) {
     if (clause.empty()) return;
-    visited.clear();  // сбрасываем посещённые узлы для новой клаузы
+    visited.clear();
     insertSequenceFrom(root, nullptr, clause, 0);
 }
 
@@ -296,10 +306,8 @@ bool parseCNF(const std::string& filename,
 int main() {
     Node* root = nullptr;
 
-    std::string filename = "test_sat.cnf";
-    // std::string filename = "uf20-01.cnf";
-    // std::string filename = "uf75-098.cnf";
-
+    // std::string filename = "test_sat.cnf";
+    std::string filename = "uf20-01.cnf";
     std::string folder_name = "test_cases/";
 
     sort_clauses(folder_name, filename);
