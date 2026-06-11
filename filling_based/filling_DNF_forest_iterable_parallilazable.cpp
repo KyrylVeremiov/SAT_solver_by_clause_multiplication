@@ -1,10 +1,18 @@
+//Iterative version of filling DNF forest, with some optimizations. 
+// The first option is to take a clause with the most amount of confilcts with all patterns and insert it.
+// The second opion to peack at each step a clause with the highest average conflict fraction,
+//  then insert it and update the tree.
+//  
+
 #include <iostream>
 #include <fstream>
-#include <sstream>
+#include <string>
 #include <vector>
-#include <map>
 #include <algorithm>
 #include <filesystem>
+#include <shared_mutex>
+#include <cctype>
+#include "../sorting_clauses_min_index.h"
 #include "filling_sorting.h"
 
 using namespace std;
@@ -17,38 +25,65 @@ struct Literal {
 
 struct Node {
     int var;
-    map<int, Node*> childTrue;
-    map<int, Node*> childFalse;
+    vector<pair<int, Node*>> childTrue;
+    vector<pair<int, Node*>> childFalse;
+    mutable std::shared_mutex mtx;
 };
 
 using Clause = vector<Literal>;
+
+#include "iterative_sorting.h"
 
 Node* anyNode = nullptr;
 Node* root    = nullptr;
 
 bool hasEmptyPattern = true;
 
-map<int,bool> toMap(const Clause& c) {
-    map<int,bool> m;
-    for (auto& lit : c)
-        m[lit.var] = lit.val;
-    return m;
+inline bool literalLess(const Literal& a, const Literal& b) {
+    return a.var < b.var;
 }
 
-bool containsVar(const Clause& pat, int var) {
-    for (auto& lit : pat)
-        if (lit.var == var)
-            return true;
-    return false;
+inline bool containsVar(const Clause& pat, int var) {
+    auto it = lower_bound(pat.begin(), pat.end(), var,
+                          [](const Literal& lit, int value) {
+                              return lit.var < value;
+                          });
+    return it != pat.end() && it->var == var;
 }
 
 Clause addLiteralSorted(const Clause& pat, Literal lit) {
-    Clause res = pat;
+    Clause res;
+    res.reserve(pat.size() + 1);
+    auto it = lower_bound(pat.begin(), pat.end(), lit,
+                          [](const Literal& a, const Literal& b) {
+                              return a.var < b.var;
+                          });
+    res.insert(res.end(), pat.begin(), it);
     res.push_back(lit);
-    sort(res.begin(), res.end(), [](const Literal& a, const Literal& b) {
-        return a.var < b.var;
-    });
+    res.insert(res.end(), it, pat.end());
     return res;
+}
+
+static Node* findChild(Node* node, int var, bool val) {
+    auto& children = val ? node->childTrue : node->childFalse;
+    std::shared_lock lock(node->mtx);
+    for (auto& [k, child] : children) {
+        if (k == var)
+            return child;
+    }
+    return nullptr;
+}
+
+static Node* insertChild(Node* node, int var, bool val) {
+    auto& children = val ? node->childTrue : node->childFalse;
+    std::unique_lock lock(node->mtx);
+    for (auto& [k, child] : children) {
+        if (k == var)
+            return child;
+    }
+    Node* nxt = new Node{var};
+    children.emplace_back(var, nxt);
+    return nxt;
 }
 
 void insertPattern(Node* root, const Clause& pat) {
@@ -59,20 +94,16 @@ void insertPattern(Node* root, const Clause& pat) {
 
     Node* cur = root;
     for (auto& lit : pat) {
-        auto& mp = lit.val ? cur->childTrue : cur->childFalse;
-        auto it = mp.find(lit.var);
-        if (it == mp.end()) {
-            Node* nxt = new Node{lit.var};
-            mp[lit.var] = nxt;
-            cur = nxt;
-        } else {
-            cur = it->second;
-        }
+        cur = insertChild(cur, lit.var, lit.val);
     }
 
-    auto& mpLeaf = pat.back().val ? cur->childTrue : cur->childFalse;
-    if (!mpLeaf.count(-1))
-        mpLeaf[-1] = anyNode;
+    auto& children = pat.back().val ? cur->childTrue : cur->childFalse;
+    std::unique_lock lock(cur->mtx);
+    for (auto& [k, child] : children) {
+        if (k == -1)
+            return;
+    }
+    children.emplace_back(-1, anyNode);
 }
 
 void removePattern(Node* root, const Clause& pat) {
@@ -83,20 +114,23 @@ void removePattern(Node* root, const Clause& pat) {
 
     Node* cur = root;
     for (auto& lit : pat) {
-        auto& mp = lit.val ? cur->childTrue : cur->childFalse;
-        auto it = mp.find(lit.var);
-        if (it == mp.end())
+        cur = findChild(cur, lit.var, lit.val);
+        if (!cur)
             return;
-        cur = it->second;
     }
 
-    auto& mpLeaf = pat.back().val ? cur->childTrue : cur->childFalse;
-    auto itLeaf = mpLeaf.find(-1);
-    if (itLeaf != mpLeaf.end())
-        mpLeaf.erase(itLeaf);
+    auto& children = pat.back().val ? cur->childTrue : cur->childFalse;
+    std::unique_lock lock(cur->mtx);
+    for (size_t i = 0; i < children.size(); ++i) {
+        if (children[i].first == -1) {
+            children.erase(children.begin() + i);
+            return;
+        }
+    }
 }
 
 void collectPatterns(Node* node, vector<Literal>& cur, vector<Clause>& out) {
+    std::shared_lock lock(node->mtx);
     for (auto& [var, child] : node->childTrue) {
         if (var == -1 && child == anyNode) {
             out.push_back(cur);
@@ -128,30 +162,35 @@ vector<Clause> getAllPatterns() {
 }
 
 bool containsSameLiteral(const Clause& T, const Clause& C) {
-    auto mT = toMap(T);
-    for (auto& lit : C) {
-        auto it = mT.find(lit.var);
-        if (it != mT.end() && it->second == lit.val)
-            return true;
+    size_t i = 0, j = 0;
+    while (i < T.size() && j < C.size()) {
+        if (T[i].var < C[j].var) {
+            ++i;
+        } else if (T[i].var > C[j].var) {
+            ++j;
+        } else {
+            if (T[i].val == C[j].val)
+                return true;
+            ++i;
+            ++j;
+        }
     }
     return false;
 }
 
 bool containsOppositeLiteral(const Clause& T, int var, bool val) {
-    for (auto& lit : T) {
-        if (lit.var == var && lit.val != val)
-            return true;
-    }
-    return false;
+    auto it = lower_bound(T.begin(), T.end(), var,
+                          [](const Literal& lit, int value) {
+                              return lit.var < value;
+                          });
+    return it != T.end() && it->var == var && it->val != val;
 }
 
-void updateTree(Node* root, const Clause& clause) {
-    vector<Clause> patterns = getAllPatterns();
-
-    for (auto& T : patterns) {
+void updateTree(Node* root, const Clause& clause, const vector<Clause>& patterns) {
+    for (auto const& T : patterns) {
         if (T.empty()) {
             removePattern(root, T);
-            for (auto& lit : clause)
+            for (auto const& lit : clause)
                 insertPattern(root, Clause{lit});
             continue;
         }
@@ -161,7 +200,7 @@ void updateTree(Node* root, const Clause& clause) {
             continue;
 
         bool inserted = false;
-        for (auto& lit : clause) {
+        for (auto const& lit : clause) {
             if (containsVar(T, lit.var))
                 continue;
             if (containsOppositeLiteral(T, lit.var, lit.val))
@@ -176,17 +215,45 @@ void updateTree(Node* root, const Clause& clause) {
     }
 }
 
-Clause readClause(istringstream& iss) {
+void updateTree(Node* root, const Clause& clause) {
+    updateTree(root, clause, getAllPatterns());
+}
+
+Clause readClause(const string& line) {
     Clause c;
-    int x;
-    while (iss >> x) {
+    c.reserve(16);
+    const char* p = line.c_str();
+    while (*p) {
+        while (*p && isspace(static_cast<unsigned char>(*p)))
+            ++p;
+        if (!*p)
+            break;
+
+        int sign = 1;
+        if (*p == '-') {
+            sign = -1;
+            ++p;
+        } else if (*p == '+') {
+            ++p;
+        }
+
+        if (!isdigit(static_cast<unsigned char>(*p))) {
+            while (*p && !isspace(static_cast<unsigned char>(*p)))
+                ++p;
+            continue;
+        }
+
+        int x = 0;
+        while (isdigit(static_cast<unsigned char>(*p))) {
+            x = x * 10 + (*p - '0');
+            ++p;
+        }
+        x *= sign;
         if (x == 0)
             break;
-        if (x > 0)
-            c.push_back({x, true});
-        else
-            c.push_back({-x, false});
+        c.push_back({x > 0 ? x : -x, x > 0});
     }
+    sort(c.begin(), c.end(), literalLess);
     return c;
 }
 
@@ -200,70 +267,17 @@ void freeTree(Node* node) {
     delete node;
 }
 
-bool sortFileClauses(const string& folderName, const string& filename, const string& criterion) {
-    string inputPath = folderName + filename;
-    string outputPath = folderName + "sorted_" + filename;
-
-    ifstream fin(inputPath);
-    if (!fin) {
-        cerr << "Cannot open input file for sorting: " << inputPath << "\n";
-        return false;
-    }
-
-    vector<string> header;
-    vector<vector<int>> clauses;
-    string line;
-    while (getline(fin, line)) {
-        if (line.empty())
-            continue;
-        if (line[0] == 'c' || line[0] == 'p') {
-            header.push_back(line);
-            continue;
-        }
-        stringstream ss(line);
-        vector<int> clause;
-        int x;
-        while (ss >> x) {
-            if (x == 0)
-                break;
-            clause.push_back(x);
-        }
-        if (!clause.empty())
-            clauses.push_back(clause);
-    }
-    fin.close();
-
-    sort_clauses(clauses, criterion);
-
-    ofstream fout(outputPath);
-    if (!fout) {
-        cerr << "Cannot open sorted output file: " << outputPath << "\n";
-        return false;
-    }
-    for (auto& h : header)
-        fout << h << "\n";
-    for (auto& cl : clauses) {
-        for (int x : cl)
-            fout << x << " ";
-        fout << "0\n";
-    }
-    fout.close();
-    return true;
-}
-
 fs::path resolveInputPath(int argc, char* argv[]) {
     vector<fs::path> candidates;
     if (argc > 1)
         candidates.emplace_back(argv[1]);
-    // candidates.emplace_back("test_test.cnf");
-    // candidates.emplace_back("test_cases/test_test.cnf");
 
-    // candidates.emplace_back("../test_cases/test_test.cnf");
+    candidates.emplace_back("../test_cases/test_test.cnf");
     // candidates.emplace_back("../test_cases/uf20-01.cnf");
     // candidates.emplace_back("../test_cases/uf20-05.cnf");
-    candidates.emplace_back("../test_cases/uuf50-01.cnf");
-    candidates.emplace_back("../test_cases/uuf50-01.cnf");
-    candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    // candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    // candidates.emplace_back("../test_cases/uf75-098.cnf");
+    // candidates.emplace_back("../test_cases/uuf75-097.cnf");
     
 
     // candidates.emplace_back("../../NewFolder/test_cases/test_test.cnf");
@@ -291,7 +305,14 @@ int main(int argc, char* argv[]) {
         folderName += fs::path::preferred_separator;
 
     string filename = inputPath.filename().string();
-    if (!sortFileClauses(folderName, filename, "max")) {
+
+    // Alternative sorting method using filling_sorting.h
+    
+    // int sortResult = sortFileClauses(folderName, filename, "max") ? 0 : 1;
+    // Для альтернативы можно раскомментировать следующую строку и закомментировать вызов sortFileClauses:
+    int sortResult = sort_clauses(folderName, filename);
+    
+    if (sortResult != 0) {
         return 1;
     }
 
@@ -305,34 +326,40 @@ int main(int argc, char* argv[]) {
     anyNode = new Node{-1};
     root    = new Node{0};
 
-    int totalClauses = 0;
+    vector<Clause> remainingClauses;
     string line;
     while (getline(fin, line)) {
         if (line.empty())
             continue;
         if (line[0] == 'c' || line[0] == 'p')
             continue;
-        ++totalClauses;
+
+        Clause c = readClause(line);
+        if (!c.empty())
+            remainingClauses.emplace_back(std::move(c));
     }
 
-    fin.clear();
-    fin.seekg(0);
-
+    int totalClauses = static_cast<int>(remainingClauses.size());
     int clauseIndex = 0;
-    while (getline(fin, line)) {
-        if (line.empty())
-            continue;
-        if (line[0] == 'c' || line[0] == 'p')
-            continue;
+    while (!remainingClauses.empty()) {
+        vector<Clause> patterns = getAllPatterns();
+        
+        size_t next = selectHighestAverageConflictClauseIndexParallel(remainingClauses, patterns, 8);
+        // Для использования прошлой версии раскомментируйте строку ниже:
+        // size_t next = selectMostConflictingClauseIndexParallel(remainingClauses, patterns, 8);
+
+        Clause c = std::move(remainingClauses[next]);
+        if (next + 1 < remainingClauses.size())
+            remainingClauses[next] = std::move(remainingClauses.back());
+        remainingClauses.pop_back();
 
         ++clauseIndex;
-        cout << "Processing clause " << clauseIndex << " / " << totalClauses
-             << ": " << line << "\n";
+        cout << "Processing clause " << clauseIndex << " / " << totalClauses << ": ";
+        for (auto& lit : c)
+            cout << (lit.val ? "" : "-") << lit.var << " ";
+        cout << "0\n";
 
-        istringstream iss(line);
-        Clause c = readClause(iss);
-        if (!c.empty())
-            updateTree(root, c);
+        updateTree(root, c);
     }
 
     vector<Clause> patterns = getAllPatterns();

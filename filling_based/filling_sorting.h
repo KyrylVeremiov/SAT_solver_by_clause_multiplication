@@ -2,7 +2,9 @@
 #define FILLING_SORTING_H
 
 #include <algorithm>
+#include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,57 @@ inline void sort_clauses(std::vector<std::vector<int>>& clauses, const std::stri
             return a < b;
         });
     }
+}
+
+inline bool sortFileClauses(const std::string& folder_name, const std::string& filename, const std::string& criterion) {
+    std::string inputPath = folder_name + filename;
+    std::string outputPath = folder_name + "sorted_" + filename;
+
+    std::ifstream fin(inputPath);
+    if (!fin) {
+        std::cerr << "Cannot open input file for sorting: " << inputPath << "\n";
+        return false;
+    }
+
+    std::vector<std::string> header;
+    std::vector<std::vector<int>> clauses;
+    std::string line;
+    while (std::getline(fin, line)) {
+        if (line.empty())
+            continue;
+        if (line[0] == 'c' || line[0] == 'p') {
+            header.push_back(line);
+            continue;
+        }
+        std::istringstream ss(line);
+        std::vector<int> clause;
+        int x;
+        while (ss >> x) {
+            if (x == 0)
+                break;
+            clause.push_back(x);
+        }
+        if (!clause.empty())
+            clauses.push_back(clause);
+    }
+    fin.close();
+
+    sort_clauses(clauses, criterion);
+
+    std::ofstream fout(outputPath);
+    if (!fout) {
+        std::cerr << "Cannot open sorted output file: " << outputPath << "\n";
+        return false;
+    }
+    for (auto& h : header)
+        fout << h << "\n";
+    for (auto& cl : clauses) {
+        for (int x : cl)
+            fout << x << " ";
+        fout << "0\n";
+    }
+    fout.close();
+    return true;
 }
 
 #endif // FILLING_SORTING_H
