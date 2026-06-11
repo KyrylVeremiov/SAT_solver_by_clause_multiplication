@@ -55,12 +55,8 @@ Clause addLiteralSorted(const Clause& pat, Literal lit) {
 
 void freeSubtree(Node* node) {
     if (!node || node == anyNode) return;
-    for (auto& [_, child] : node->childTrue) {
-        freeSubtree(child);
-    }
-    for (auto& [_, child] : node->childFalse) {
-        freeSubtree(child);
-    }
+    for (auto& [_, child] : node->childTrue) freeSubtree(child);
+    for (auto& [_, child] : node->childFalse) freeSubtree(child);
     delete node;
 }
 
@@ -73,14 +69,16 @@ void insertPattern(Node* root, const Clause& pat) {
     }
 
     Node* cur = root;
+
     for (auto& lit : pat) {
-        // If node is already a leaf (has link to anyNode in any child map),
-        // no further descendants are allowed
-        if (cur->childTrue.count(-1) || cur->childFalse.count(-1)) {
+
+        auto& mp = lit.val ? cur->childTrue : cur->childFalse;
+
+        // If THIS branch already has anyNode → insertion forbidden
+        if (mp.count(-1)) {
             return;
         }
 
-        auto& mp = lit.val ? cur->childTrue : cur->childFalse;
         auto it = mp.find(lit.var);
         if (it == mp.end()) {
             Node* nxt = new Node{lit.var};
@@ -91,18 +89,13 @@ void insertPattern(Node* root, const Clause& pat) {
         }
     }
 
-    // Node cur becomes a leaf: free all its subtrees
-    for (auto& [k, child] : cur->childTrue) {
-        if (k != -1) freeSubtree(child);
-    }
-    for (auto& [k, child] : cur->childFalse) {
-        if (k != -1) freeSubtree(child);
-    }
-    cur->childTrue.clear();
-    cur->childFalse.clear();
-
-    // Set link to anyNode in the correct direction
+    // Set ANYNODE ONLY in the correct branch
     auto& mpLeaf = pat.back().val ? cur->childTrue : cur->childFalse;
+
+    // If this branch already has anyNode — nothing to do
+    if (mpLeaf.count(-1)) return;
+
+    // Otherwise set leaf marker
     mpLeaf[-1] = anyNode;
 }
 
@@ -122,22 +115,22 @@ void removePattern(Node* root, const Clause& pat) {
         if (it == mp.end()) return;
         cur = it->second;
     }
-    const auto& last = pat.back();
-    auto& mpLeaf = last.val ? cur->childTrue : cur->childFalse;
+
+    auto& mpLeaf = pat.back().val ? cur->childTrue : cur->childFalse;
     auto itLeaf = mpLeaf.find(-1);
     if (itLeaf != mpLeaf.end()) mpLeaf.erase(itLeaf);
 }
 
-// ---------- Collect all patterns ----------
+// ---------- Collect patterns ----------
 
 void collectPatterns(Node* node,
                      vector<Literal>& cur,
                      vector<Clause>& out)
 {
     for (auto& [var, child] : node->childTrue) {
-        if (var == -1 && child == anyNode) {
+        if (var == -1 && child == anyNode)
             out.push_back(cur);
-        } else {
+        else {
             cur.push_back({var, true});
             collectPatterns(child, cur, out);
             cur.pop_back();
@@ -145,9 +138,9 @@ void collectPatterns(Node* node,
     }
 
     for (auto& [var, child] : node->childFalse) {
-        if (var == -1 && child == anyNode) {
+        if (var == -1 && child == anyNode)
             out.push_back(cur);
-        } else {
+        else {
             cur.push_back({var, false});
             collectPatterns(child, cur, out);
             cur.pop_back();
@@ -181,7 +174,7 @@ bool isFullNegation(const Clause& T, const Clause& C) {
 }
 
 bool isSubsetCompatible(const Clause& T, const Clause& C) {
-    if (T.empty()) return false; // important: empty pattern should not be treated as subset
+    if (T.empty()) return false;
     auto mC = toMap(C);
     for (auto& lit : T) {
         auto it = mC.find(lit.var);
@@ -191,7 +184,7 @@ bool isSubsetCompatible(const Clause& T, const Clause& C) {
     return true;
 }
 
-// ---------- Update tree with one clause ----------
+// ---------- Update tree ----------
 
 void updateTree(Node* root, const Clause& clause) {
     vector<Clause> patterns = getAllPatterns();
@@ -220,7 +213,7 @@ void updateTree(Node* root, const Clause& clause) {
     }
 }
 
-// ---------- Read one clause from line ----------
+// ---------- Read clause ----------
 
 Clause readClause(istringstream& iss) {
     Clause c;
@@ -237,35 +230,23 @@ Clause readClause(istringstream& iss) {
 
 void freeTree(Node* node) {
     if (!node || node == anyNode) return;
-    for (auto& [_, child] : node->childTrue) {
-        freeTree(child);
-    }
-    for (auto& [_, child] : node->childFalse) {
-        freeTree(child);
-    }
+    for (auto& [_, child] : node->childTrue) freeTree(child);
+    for (auto& [_, child] : node->childFalse) freeTree(child);
     delete node;
 }
 
 // ---------- MAIN ----------
 
 int main() {
-    // const string filename = "test_test.cnf";
-    // std::string filename    = "test_sat.cnf";
-    std::string filename    = "uf20-01.cnf";
-    // std::string filename    = "uf20-05.cnf";
-    // std::string filename    = "uuf50-01.cnf";
-    // std::string filename    = "uf75-098.cnf";
-    // std::string filename    = "uuf75-097.cnf";
-
+    std::string filename    = "test_test.cnf";
+    // std::string filename    = "uf20-01.cnf";
     std::string folder_name = "../test_cases/";
 
-    // Sort clauses before processing
     sort_clauses(folder_name, filename);
 
     anyNode = new Node{-1};
     root    = new Node{0};
 
-    // Count total number of clauses (non-comment, non-header lines)
     int totalClauses = 0;
     {
         ifstream countFile(folder_name + "sorted_" + filename);
@@ -278,11 +259,9 @@ int main() {
         }
     }
 
-    ifstream fin(folder_name + "sorted_" + filename);
+    ifstream fin(folder_name +  filename);
     if (!fin) {
-        cerr << "Cannot open file: " << folder_name << "sorted_" << filename << "\n";
-        delete anyNode;
-        delete root;
+        cerr << "Cannot open file\n";
         return 1;
     }
 
@@ -295,25 +274,21 @@ int main() {
         if (line[0] == 'p') continue;
 
         clauseIndex++;
-
         cout << "Processing clause " << clauseIndex << " / " << totalClauses
              << ": " << line << "\n";
 
         istringstream iss(line);
         Clause c = readClause(iss);
-        if (!c.empty()) {
-            updateTree(root, c);
-        }
+        if (!c.empty()) updateTree(root, c);
     }
 
     vector<Clause> patterns = getAllPatterns();
 
     cout << "Final patterns:\n";
     for (const auto& pat : patterns) {
-        if (pat.empty()) continue; // do not print empty pattern
-        for (auto& lit : pat) {
+        if (pat.empty()) continue;
+        for (auto& lit : pat)
             cout << (lit.val ? "" : "-") << lit.var << " ";
-        }
         cout << "0\n";
     }
 
