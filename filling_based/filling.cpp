@@ -5,7 +5,7 @@
 #include <map>
 #include <algorithm>
 #include <filesystem>
-#include "../sorting_clauses_min_index.h"
+#include "filling_sorting.h"
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -200,6 +200,57 @@ void freeTree(Node* node) {
     delete node;
 }
 
+bool sortFileClauses(const string& folderName, const string& filename, const string& criterion) {
+    string inputPath = folderName + filename;
+    string outputPath = folderName + "sorted_" + filename;
+
+    ifstream fin(inputPath);
+    if (!fin) {
+        cerr << "Cannot open input file for sorting: " << inputPath << "\n";
+        return false;
+    }
+
+    vector<string> header;
+    vector<vector<int>> clauses;
+    string line;
+    while (getline(fin, line)) {
+        if (line.empty())
+            continue;
+        if (line[0] == 'c' || line[0] == 'p') {
+            header.push_back(line);
+            continue;
+        }
+        stringstream ss(line);
+        vector<int> clause;
+        int x;
+        while (ss >> x) {
+            if (x == 0)
+                break;
+            clause.push_back(x);
+        }
+        if (!clause.empty())
+            clauses.push_back(clause);
+    }
+    fin.close();
+
+    sort_clauses(clauses, criterion);
+
+    ofstream fout(outputPath);
+    if (!fout) {
+        cerr << "Cannot open sorted output file: " << outputPath << "\n";
+        return false;
+    }
+    for (auto& h : header)
+        fout << h << "\n";
+    for (auto& cl : clauses) {
+        for (int x : cl)
+            fout << x << " ";
+        fout << "0\n";
+    }
+    fout.close();
+    return true;
+}
+
 fs::path resolveInputPath(int argc, char* argv[]) {
     vector<fs::path> candidates;
     if (argc > 1)
@@ -211,6 +262,9 @@ fs::path resolveInputPath(int argc, char* argv[]) {
     // candidates.emplace_back("../test_cases/uf20-01.cnf");
     // candidates.emplace_back("../test_cases/uf20-05.cnf");
     candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    
 
     // candidates.emplace_back("../../NewFolder/test_cases/test_test.cnf");
     // candidates.emplace_back("../NewFolder/test_cases/test_test.cnf");
@@ -237,7 +291,9 @@ int main(int argc, char* argv[]) {
         folderName += fs::path::preferred_separator;
 
     string filename = inputPath.filename().string();
-    sort_clauses(folderName, filename);
+    if (!sortFileClauses(folderName, filename, "max")) {
+        return 1;
+    }
 
     fs::path sortedPath = folderPath / ("sorted_" + filename);
     ifstream fin(sortedPath);

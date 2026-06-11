@@ -300,16 +300,17 @@ int main() {
     Node* root = nullptr;
 
     // std::string filename    = "test_sat.cnf";
-    std::string filename    = "uf20-01.cnf";
+    // std::string filename    = "uf20-01.cnf";
     // std::string filename    = "uf20-05.cnf";
     // std::string filename    = "uuf50-01.cnf";
-    // std::string filename    = "uf75-098.cnf";
+    std::string filename    = "uf75-098.cnf";
     // std::string filename    = "uuf75-097.cnf";
 
     
     std::string folder_name = "test_cases/";
 
     sort_clauses(folder_name, filename);
+    sortFileClauses(folder_name, filename, "max");
 
     std::vector<std::vector<Literal>> clauses;
     if (!parseCNF(folder_name + "sorted_" + filename, clauses)) {
