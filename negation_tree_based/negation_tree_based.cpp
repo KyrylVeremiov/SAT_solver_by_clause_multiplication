@@ -1,126 +1,127 @@
 #include <bits/stdc++.h>
 using namespace std;
 
-int n_vars, n_clauses;
-vector<vector<int>> clauses;              // все клаузы (после инверсии и сортировки)
-vector<vector<int>> value_true;          // для каждой переменной: индексы клауз, где минимальный литерал положительный
-vector<vector<int>> value_false;         // для каждой переменной: индексы клауз, где минимальный литерал отрицательный
+// Global structures
+int n_vars;                                      // number of variables
+vector<vector<vector<int>>> value_true;          // value_true[x-1] -> list of clauses
+vector<vector<vector<int>>> value_false;         // value_false[x-1] -> list of clauses
+int max_clause_index = 0;                        // as defined in the description
 
-// Получить ссылку на клаузу по паре (var_with_sign, idx_in_vector)
-const vector<int>& get_clause(const pair<int,int>& ref) {
-    int v = ref.first;
-    int pos = ref.second;
-    int var = abs(v);
-    int clause_index;
-    if (v > 0) {
-        clause_index = value_true[var][pos];
-    } else {
-        clause_index = value_false[var][pos];
+// Print assignment like "1 -2 3 0"
+void print_assignment(const vector<int>& vals) {
+    for (int v : vals) {
+        cout << v << " ";
     }
-    return clauses[clause_index];
+    cout << 0 << "\n";
 }
 
-// Проверка: содержит ли клауза литерал val и он последний
-bool contains_literal_last(const vector<int>& clause, int val) {
-    for (int i = 0; i < (int)clause.size(); ++i) {
-        if (clause[i] == val) {
-            return i == (int)clause.size() - 1;
-        }
-    }
-    return false;
-}
+// test_set: set of (signed_var_index, clause_index)
+// val: literal to check as last in clause (e.g. 7 or -7)
+bool check_variable(int val, const set<pair<int,int>>& test_set) {
+    for (auto [v, idx] : test_set) {
+        const vector<int>& clause = (v > 0)
+            ? value_true[v - 1][idx]
+            : value_false[-v - 1][idx];
 
-// Функция check_variable(val, test_set)
-bool check_variable(int val, const vector<pair<int,int>>& test_set) {
-    for (const auto& ref : test_set) {
-        const vector<int>& cl = get_clause(ref);
-        if (contains_literal_last(cl, val)) {
+        if (!clause.empty() && clause.back() == val) {
             return false;
         }
     }
     return true;
 }
 
-// Рекурсивная функция find_solution
+// Recursive search
 bool find_solution(int current_var,
-                   const vector<pair<int,int>>& var_set,
+                   const set<pair<int,int>>& var_set,
                    const vector<int>& prev_values) {
-    if (current_var > n_vars) {
-        return false; // пункт 0
+    // 0. Base conditions
+
+    // If no clauses to track and we passed all possible starting indices
+    if (var_set.empty() && current_var > max_clause_index) {
+        print_assignment(prev_values);
+        return true;
     }
 
-    vector<pair<int,int>> this_var_true;
-    vector<pair<int,int>> this_var_false;
-    vector<pair<int,int>> this_var_unknown;
+    // If variable index is out of range
+    if (abs(current_var) > n_vars) {
+        return false;
+    }
 
-    // 1. Разбор var_set
-    for (const auto& ref : var_set) {
-        const vector<int>& cl = get_clause(ref);
-        bool has_true = false, has_false = false;
-        for (int lit : cl) {
-            if (lit == current_var) has_true = true;
-            if (lit == -current_var) has_false = true;
+    // 1. Split var_set into three groups
+    set<pair<int,int>> this_var_true;
+    set<pair<int,int>> this_var_false;
+    set<pair<int,int>> this_var_unknown;
+
+    for (auto [v, idx] : var_set) {
+        const vector<int>& clause = (v > 0)
+            ? value_true[v - 1][idx]
+            : value_false[-v - 1][idx];
+
+        bool has_pos = false;
+        bool has_neg = false;
+        for (int lit : clause) {
+            if (lit == current_var)  has_pos = true;
+            if (lit == -current_var) has_neg = true;
         }
-        if (has_true) {
-            this_var_true.push_back(ref);
-        } else if (has_false) {
-            this_var_false.push_back(ref);
+
+        if (has_pos) {
+            this_var_true.insert({v, idx});
+        } else if (has_neg) {
+            this_var_false.insert({v, idx});
         } else {
-            this_var_unknown.push_back(ref);
+            this_var_unknown.insert({v, idx});
         }
     }
 
-    // 1.1. Добавить все клаузы из value_true[current_var] и value_false[current_var]
-    for (int i = 0; i < (int)value_true[current_var].size(); ++i) {
-        this_var_true.emplace_back(current_var, i);
-    }
-    for (int i = 0; i < (int)value_false[current_var].size(); ++i) {
-        this_var_false.emplace_back(-current_var, i);
+    // 1.1. Add all clauses that start with current_var (after inversion/sorting)
+    if (current_var >= 1 && current_var <= n_vars) {
+        int idx = current_var - 1;
+
+        for (int i = 0; i < (int)value_true[idx].size(); ++i) {
+            this_var_true.insert({current_var, i});
+        }
+        for (int i = 0; i < (int)value_false[idx].size(); ++i) {
+            this_var_false.insert({-current_var, i});
+        }
     }
 
-    // 2. Проверка на пустое unknown
-    bool printed = false;
-    if (this_var_unknown.empty()) {
-        if (this_var_true.empty()) {
-            // вывод prev_values + current_var
-            for (int v : prev_values) cout << v << " ";
-            cout << current_var << " 0\n";
-            printed = true;
-        }
-        if (this_var_false.empty()) {
-            for (int v : prev_values) cout << v << " ";
-            cout << -current_var << " 0\n";
-            printed = true;
-        }
-        if (printed) return true;
-    }
-
-    // Если unknown непустое, а true и false пустые
-    if (!this_var_unknown.empty() && this_var_true.empty() && this_var_false.empty()) {
+    // 2. If only unknown clauses exist for this variable
+    if (!this_var_unknown.empty() &&
+        this_var_true.empty() &&
+        this_var_false.empty()) {
         return find_solution(current_var + 1, this_var_unknown, prev_values);
     }
 
-    // 3. Работа с check_variable
-    bool can_be_true = check_variable(current_var, this_var_true);
+    // 3. Check if current variable can be true/false
+    bool can_be_true  = check_variable(current_var,  this_var_true);
     bool can_be_false = check_variable(-current_var, this_var_false);
 
     if (!can_be_true && !can_be_false) {
         return false;
     }
 
-    // 4. Рекурсивные вызовы
-    bool value_true_res = false, value_false_res = false;
+    // 4. Recurse with unions: (true ∪ unknown) and (false ∪ unknown)
+    bool value_true_res = false;
+    bool value_false_res = false;
 
     if (can_be_true) {
-        vector<int> new_prev = prev_values;
-        new_prev.push_back(current_var);
-        value_true_res = find_solution(current_var + 1, this_var_true, new_prev);
+        set<pair<int,int>> next_set_true = this_var_true;
+        next_set_true.insert(this_var_unknown.begin(), this_var_unknown.end());
+
+        vector<int> next_values = prev_values;
+        next_values.push_back(current_var);
+
+        value_true_res = find_solution(current_var + 1, next_set_true, next_values);
     }
 
     if (can_be_false) {
-        vector<int> new_prev = prev_values;
-        new_prev.push_back(-current_var);
-        value_false_res = find_solution(current_var + 1, this_var_false, new_prev);
+        set<pair<int,int>> next_set_false = this_var_false;
+        next_set_false.insert(this_var_unknown.begin(), this_var_unknown.end());
+
+        vector<int> next_values = prev_values;
+        next_values.push_back(-current_var);
+
+        value_false_res = find_solution(current_var + 1, next_set_false, next_values);
     }
 
     return value_true_res || value_false_res;
@@ -130,18 +131,20 @@ int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    // Чтение DIMACS из файла ../test_cases/test_test.cnf
-    ifstream fin("../test_cases/test_test.cnf");
+    string filename = "../test_cases/test_test.cnf";
+    // string filename = "../test_cases/uf20-01.cnf";
+    // string filename = "../test_cases/uf20-05.cnf";
+    // string filename = "../test_cases/uuf50-01.cnf";
+    ifstream fin(filename);
     if (!fin) {
-        cerr << "Cannot open file ../test_cases/test_test.cnf\n";
+        cerr << "Cannot open file: " << filename << "\n";
         return 1;
     }
 
     string line;
-    n_vars = 0;
-    n_clauses = 0;
+    int n_clauses = 0;
 
-    // Сначала ищем строку p cnf
+    // Read header "p cnf n m"
     while (getline(fin, line)) {
         if (line.empty()) continue;
         if (line[0] == 'c') continue;
@@ -153,46 +156,68 @@ int main() {
         }
     }
 
-    clauses.clear();
-    value_true.assign(n_vars + 1, {});
-    value_false.assign(n_vars + 1, {});
+    value_true.assign(n_vars, {});
+    value_false.assign(n_vars, {});
 
-    // Чтение клауз
-    int lit;
-    vector<int> clause;
-    while (fin >> lit) {
-        if (lit == 0) {
-            if (!clause.empty()) {
-                // Инверсия литералов
-                for (int& x : clause) x = -x;
+    // Read clauses
+    int read_clauses = 0;
+    while (read_clauses < n_clauses && fin) {
+        vector<int> clause;
+        int lit;
+        bool got_any = false;
 
-                // Сортировка по возрастанию индекса (по |x|)
-                sort(clause.begin(), clause.end(),
-                     [](int a, int b) {
-                         if (abs(a) != abs(b)) return abs(a) < abs(b);
-                         return a < b;
-                     });
+        while (fin >> lit) {
+            if (lit == 0) {
+                if (got_any) {
+                    // Invert literals
+                    for (int &x : clause) x = -x;
 
-                int clause_index = (int)clauses.size();
-                clauses.push_back(clause);
+                    // Sort by absolute index (then by sign)
+                    sort(clause.begin(), clause.end(), [](int a, int b) {
+                        if (abs(a) != abs(b)) return abs(a) < abs(b);
+                        return a < b;
+                    });
 
-                // Определяем минимальный индекс и знак
-                int minAbs = abs(clause[0]);
-                int sign = (clause[0] > 0) ? 1 : -1;
-                if (sign > 0) {
-                    value_true[minAbs].push_back(clause_index);
-                } else {
-                    value_false[minAbs].push_back(clause_index);
+                    // Determine smallest index and sign
+                    int min_lit = clause[0];
+                    int var = abs(min_lit);
+
+                    if (var >= 1 && var <= n_vars) {
+                        if (min_lit > 0) {
+                            value_true[var - 1].push_back(clause);
+                        } else {
+                            value_false[var - 1].push_back(clause);
+                        }
+                    }
+
+                    ++read_clauses;
+                    clause.clear();
+                    got_any = false;
                 }
+                break;
+            } else {
+                clause.push_back(lit);
+                got_any = true;
             }
-            clause.clear();
-        } else {
-            clause.push_back(lit);
         }
     }
 
+    // Compute max_clause_index: maximum index that can be first in a clause
+    max_clause_index = 0;
+    for (int i = 0; i < n_vars; ++i) {
+        if (!value_true[i].empty() || !value_false[i].empty()) {
+            max_clause_index = i + 1;
+        }
+    }
+    if (max_clause_index == 0) {
+        max_clause_index = n_vars;
+    }
+
+    set<pair<int,int>> empty_set;
+    vector<int> empty_values;
+
     cout << "Result:\n";
-    bool sat = find_solution(1, {}, {});
+    bool sat = find_solution(1, empty_set, empty_values);
     cout << sat << " - SAT result for the formula\n";
 
     return 0;
