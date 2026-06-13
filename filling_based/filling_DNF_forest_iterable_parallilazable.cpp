@@ -696,8 +696,8 @@ fs::path resolveInputPath(int argc, char* argv[]) {
     // candidates.emplace_back("../test_cases/test_test.cnf");
     // candidates.emplace_back("../test_cases/uf20-01.cnf");
     // candidates.emplace_back("../test_cases/uf20-05.cnf");
-    // candidates.emplace_back("../test_cases/uuf50-01.cnf");
-    candidates.emplace_back("../test_cases/uf75-098.cnf");
+    candidates.emplace_back("../test_cases/uuf50-01.cnf");
+    // candidates.emplace_back("../test_cases/uf75-098.cnf");
     // candidates.emplace_back("../test_cases/uuf75-097.cnf");
     
 
