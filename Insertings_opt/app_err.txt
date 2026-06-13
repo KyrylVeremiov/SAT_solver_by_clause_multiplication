@@ -1,0 +1,2 @@
+'C:\Users\verem\Downloads\1\NewFolder\Insertings_opt\app.exe' was blocked by your organization's Device Guard policy.
+Contact your support person for more info.
