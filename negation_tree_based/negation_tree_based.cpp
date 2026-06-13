@@ -196,10 +196,12 @@ int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    // string filename = "../test_cases/test_test.cnf";
+    string filename = "../test_cases/test_test.cnf";
     // string filename = "../test_cases/uf20-01.cnf";
     // string filename = "../test_cases/uf20-05.cnf";
-    string filename = "../test_cases/uuf50-01.cnf";
+    // string filename = "../test_cases/uuf50-01.cnf";
+    // string filename = "../test_cases/uf75-098.cnf";
+    // string filename = "../test_cases/uuf75-097.cnf";
     ifstream fin(filename);
     if (!fin) {
         cerr << "Cannot open file: " << filename << "\n";
