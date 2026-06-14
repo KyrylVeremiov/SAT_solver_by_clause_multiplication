@@ -318,20 +318,13 @@ int main() {
     // std::string filename    = "test_sat.cnf";
     // std::string filename    = "uf20-01.cnf";
     // std::string filename    = "uf20-05.cnf";
-    std::string filename    = "uuf50-01.cnf";
+    // std::string filename    = "uuf50-01.cnf";
     // std::string filename    = "uf75-098.cnf";
-    // std::string filename    = "uuf75-097.cnf";
+    std::string filename    = "uuf75-097.cnf";
 
     std::string folder_name = "../test_cases/";
 
     sort_clauses_max_min_index(folder_name, filename); // best memory usage?
-    // sort_clauses(folder_name, filename);
-
-    // sort_clauses_min_range(folder_name, filename);
-    // sort_clauses_max_min_index(folder_name, filename);
-    // sort_clauses_min_index(folder_name, filename);
-    // sort_clauses(folder_name, filename);
-    // sortFileClauses(folder_name, filename, "min");
 
     const std::string sortedFilename = folder_name + "sorted_" + filename;
     int total = countClauses(sortedFilename);
